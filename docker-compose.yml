@@ -2,7 +2,14 @@ name: ai-plot-generator
 
 networks:
   ai_plot_generator:
+  traefik:
+    name: traefik
+    external: true
   kafka:
+
+volumes:
+  postgres_data:
+  postgres_config:
 
 services:
   app:
@@ -18,6 +25,9 @@ services:
       - .env
     expose:
       - 8000
+    depends_on:
+      db_pg:
+        condition: service_healthy
     restart: on-failure
     volumes:
       - .:/app
@@ -32,3 +42,25 @@ services:
       - "traefik.enable=true"
       - "traefik.http.routers.ai_plot.rule=Host(`ai_plot.localhost`)"
       - "traefik.http.routers.ai_plot.entrypoints=web"
+
+  db_pg:
+    image: postgres:18-alpine
+    shm_size: 128mb
+    restart: always
+    environment:
+      POSTGRES_DB: ${POSTGRES__DB?POSTGRES__DB is required}
+      POSTGRES_USER: ${POSTGRES__USER?POSTGRES__USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES__PASSWORD?POSTGRES__PASSWORD is required}
+    ports:
+      - 9877:${POSTGRES__PORT?POSTGRES__PORT is required}
+    networks:
+      - ai_plot_generator
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB" ]
+      interval: 2s
+      timeout: 2s
+      retries: 5
+      start_period: 1s
+    volumes:
+      - postgres_data:/var/lib/postgresql
+      - postgres_config:/etc/postgresql

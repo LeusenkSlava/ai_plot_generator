@@ -2,40 +2,31 @@ ARG PYTHON_VERSION=3.13
 FROM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-trixie-slim
 
 ARG APP_VERSION=develop
-ARG ENVIRONMENT="prod"
 ARG USER_UID=1000
 ARG USER_GID=1000
 
 ENV APP_VERSION=${APP_VERSION}
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
-ENV UV_HTTP_TIMEOUT=300
-ENV UV_LINK_MODE=copy
-ENV UV_PROJECT_ENVIRONMENT=/usr/local
+ENV UV_PYTHON_INSTALL_DIR=/opt/uv/python
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 
 WORKDIR /app
 
 COPY pyproject.toml uv.lock README.md ./
 
-# Установка системных зависимостей
-RUN if [ "${ENVIRONMENT}" = "prod" ]; then \
-      uv sync --frozen --no-cache --no-dev --no-install-project; \
-    else \
-      uv sync --frozen --no-cache --dev --no-install-project; \
-    fi
+RUN uv sync --frozen --no-cache --no-install-project
 
 COPY . .
 
-RUN if [ "${ENVIRONMENT}" = "prod" ]; then \
-      uv sync --frozen --no-cache --no-dev; \
-    else \
-      uv sync --frozen --no-cache --dev; \
-    fi
+RUN uv sync --frozen --no-cache
 
 RUN groupadd -g ${USER_GID} runner \
-    && useradd -u ${USER_UID} -g runner -m -s /usr/sbin/nologin runner \
-    && chown -R runner:runner /app \
-    && chmod -R g=u /app
+  && useradd -u ${USER_UID} -g runner -m -s /usr/sbin/nologin runner \
+  && mkdir -p /opt/venv /opt/uv \
+  && chown -R runner:runner /app /opt/venv /opt/uv \
+  && chmod -R g=u /app /opt/venv /opt/uv
 
 USER runner
 

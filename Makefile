@@ -50,3 +50,11 @@ stop:
 .PHONY: prune
 prune:
 	$(DOCKER_PRUNE)
+
+.PHONY: migration
+migration: docker-env
+	@if [ -z "$(m)" ]; then \
+		echo "Ошибка: Укажите описание миграции. Пример: make migration m=\"Add novels model\""; \
+		exit 1; \
+	fi
+	$(DOCKER_COMPOSE) exec app alembic revision --autogenerate -m "$(m)"
