@@ -1,8 +1,8 @@
 import logging
 
-from src.core.novels.models import Novel
-from src.core.novels.interfaces import NovelGeneratorProtocol
 from src.core.novels.exceptions import NovelGenerationError
+from src.core.novels.interfaces import NovelGeneratorProtocol
+from src.core.novels.models import Novel
 from src.core.novels.services.crud import NovelService
 
 logger = logging.getLogger(__name__)
@@ -19,7 +19,7 @@ class NovelGenerator:
         try:
             data = await self._generator.generate(promt)
         except Exception as e:
-            logger.error("NovelGenerator.generate: {}".format(e))
+            logger.error(f"NovelGenerator.generate: {e}")
             raise NovelGenerationError(str(e))
 
         novel = Novel(

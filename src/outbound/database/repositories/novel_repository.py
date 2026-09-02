@@ -1,9 +1,22 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.outbound.database.models.novels import NovelModel, CharacterModel, RoadmapModel, SceneModel, DialogueLineModel, \
-    DialogueActionModel
-from src.core.novels.models import Novel, Character, Roadmap, Scene, DialogueLine, DialogueAction
+from src.core.novels.models import (
+    Character,
+    DialogueAction,
+    DialogueLine,
+    Novel,
+    Roadmap,
+    Scene,
+)
+from src.outbound.database.models.novels import (
+    CharacterModel,
+    DialogueActionModel,
+    DialogueLineModel,
+    NovelModel,
+    RoadmapModel,
+    SceneModel,
+)
 
 
 class CharacterRepository:
@@ -204,12 +217,12 @@ class DialogueLineRepository:
 
     async def add(self, dialog_line: DialogueLine) -> DialogueLine:
         db_dialog_line = DialogueLineModel(
-            novel_id = dialog_line.novel_id,
-            scene_id = dialog_line.scene_id,
-            character_id = dialog_line.character_id,
-            order = dialog_line.order,
-            text = dialog_line.text,
-            is_final_for_roadmap = dialog_line.is_final_for_roadmap
+            novel_id=dialog_line.novel_id,
+            scene_id=dialog_line.scene_id,
+            character_id=dialog_line.character_id,
+            order=dialog_line.order,
+            text=dialog_line.text,
+            is_final_for_roadmap=dialog_line.is_final_for_roadmap,
         )
         self._session.add(db_dialog_line)
         await self._session.flush()
@@ -254,7 +267,7 @@ class DialogueLineRepository:
             character_id=db_dialog_line.character_id,
             order=db_dialog_line.order,
             text=db_dialog_line.text,
-            is_final_for_roadmap = db_dialog_line.is_final_for_roadmap
+            is_final_for_roadmap=db_dialog_line.is_final_for_roadmap,
         )
 
 
@@ -265,8 +278,8 @@ class DialogueActionRepository:
     async def add(self, dialog_action: DialogueAction) -> DialogueAction:
         db_dialog_action = DialogueActionModel(
             dialogue_line_id=dialog_action.dialogue_line_id,
-            order = dialog_action.order,
-            text = dialog_action.text,
+            order=dialog_action.order,
+            text=dialog_action.text,
             next_roadmap_id=dialog_action.next_roadmap_id,
         )
         self._session.add(db_dialog_action)
@@ -275,13 +288,17 @@ class DialogueActionRepository:
 
     async def get_by_id(self, dialog_action_id: int) -> DialogueAction | None:
         result = await self._session.execute(
-            select(DialogueActionModel).where(DialogueActionModel.id == dialog_action_id)
+            select(DialogueActionModel).where(
+                DialogueActionModel.id == dialog_action_id
+            )
         )
         db_dialog_action = result.scalar_one_or_none()
         return self._to_domain(db_dialog_action) if db_dialog_action else None
 
     async def delete(self, dialog_action_id: int) -> None:
-        db_dialog_action = await self._session.get(DialogueActionModel, dialog_action_id)
+        db_dialog_action = await self._session.get(
+            DialogueActionModel, dialog_action_id
+        )
         if db_dialog_action:
             await self._session.delete(db_dialog_action)
 
@@ -292,7 +309,7 @@ class DialogueActionRepository:
             created_at=db_dialog_action.created_at,
             updated_at=db_dialog_action.updated_at,
             dialogue_line_id=db_dialog_action.dialogue_line_id,
-            order = db_dialog_action.order,
-            text = db_dialog_action.text,
-            next_roadmap_id = db_dialog_action.next_roadmap_id,
+            order=db_dialog_action.order,
+            text=db_dialog_action.text,
+            next_roadmap_id=db_dialog_action.next_roadmap_id,
         )

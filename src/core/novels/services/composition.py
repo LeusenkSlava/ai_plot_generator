@@ -14,5 +14,6 @@ class NovelCompositionService:
         self._novel_generator = novel_generator
 
     async def create(self, user_promt: str) -> Novel:
+        logger.info(f"Creating novel for prompt: {user_promt}")
         novel = await self._novel_generator.generate(user_promt)
         return novel

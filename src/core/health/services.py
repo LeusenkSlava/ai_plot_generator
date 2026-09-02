@@ -9,10 +9,12 @@ class ComponentResult:
     ok: bool
     details: str | None = None
 
+
 @dataclass
 class HealthResult:
     healthy: bool
     components: list[ComponentResult]
+
 
 class HealthService:
     async def check(self, checkers: dict[str, "HealthCheckerProtocol"]) -> HealthResult:

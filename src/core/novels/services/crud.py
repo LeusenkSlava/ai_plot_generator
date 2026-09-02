@@ -1,6 +1,17 @@
-from src.core.novels.interfaces import CharacterRepositoryProtocol, RoadmapRepositoryProtocol, NovelRepositoryProtocol, \
-    DialogueLineRepositoryProtocol, DialogueActionProtocol
-from src.core.novels.models import Character, Roadmap, Novel, DialogueLine, DialogueAction
+from src.core.novels.interfaces import (
+    CharacterRepositoryProtocol,
+    DialogueActionProtocol,
+    DialogueLineRepositoryProtocol,
+    NovelRepositoryProtocol,
+    RoadmapRepositoryProtocol,
+)
+from src.core.novels.models import (
+    Character,
+    DialogueAction,
+    DialogueLine,
+    Novel,
+    Roadmap,
+)
 
 
 class CharacterService:
@@ -62,6 +73,7 @@ class NovelService:
 
     async def delete(self, novel_id: int) -> None:
         await self._repository.delete(novel_id)
+
 
 class DialogueLineService:
     def __init__(self, repository: DialogueLineRepositoryProtocol):

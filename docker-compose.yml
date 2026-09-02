@@ -6,6 +6,8 @@ networks:
     name: traefik
     external: true
   kafka:
+    name: kafka
+    external: true
 
 volumes:
   postgres_data:

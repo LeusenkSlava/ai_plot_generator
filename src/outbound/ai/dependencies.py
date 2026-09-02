@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import Request, Depends
+from fastapi import Depends, Request
 from openai import AsyncOpenAI
 
 from src.outbound.ai.deepseek_client import DeepSeekNovelGenerator

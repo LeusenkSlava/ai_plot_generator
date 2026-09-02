@@ -1,6 +1,12 @@
 from typing import Protocol
 
-from src.core.novels.models import Novel, Character, Roadmap, DialogueAction, DialogueLine
+from src.core.novels.models import (
+    Character,
+    DialogueAction,
+    DialogueLine,
+    Novel,
+    Roadmap,
+)
 
 
 class DialogueActionProtocol(Protocol):

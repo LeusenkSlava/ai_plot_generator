@@ -1,8 +1,7 @@
 import json
 import logging
-from openai import APIError, APIConnectionError
-from openai import AsyncOpenAI
 
+from openai import APIConnectionError, APIError, AsyncOpenAI
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +19,7 @@ class DeepSeekNovelGenerator:
                 temperature=0.9,
             )
         except (APIError, APIConnectionError) as e:
-            logger.error("DeepSeekNovelGenerator.generate_j: {}".format(e))
+            logger.error(f"DeepSeekNovelGenerator.generate_j: {e}")
             raise RuntimeError(f"DeepSeek API error: {e}") from e
 
         content = response.choices[0].message.content

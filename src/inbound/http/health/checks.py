@@ -1,11 +1,17 @@
-from fastapi import APIRouter, Depends
 from typing import Annotated
 
-from src.inbound.http.health.schemas import HealthResponse, ComponentsHealth, ComponentStatus
-from src.inbound.http.health.dependencies import get_health_service, get_health_checkers
+from fastapi import APIRouter, Depends
+
 from src.core.health.services import HealthService
+from src.inbound.http.health.dependencies import get_health_checkers, get_health_service
+from src.inbound.http.health.schemas import (
+    ComponentsHealth,
+    ComponentStatus,
+    HealthResponse,
+)
 
 router = APIRouter()
+
 
 @router.get("/health", response_model=HealthResponse)
 async def health_check(

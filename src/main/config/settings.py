@@ -30,6 +30,12 @@ class PostgresSettings(BaseModel):
 
 class DeepSeekSettings(BaseSettings):
     API_KEY: str
+    BASE_URL: str = "https://api.deepseek.com"
+
+
+class KafkaSettings(BaseSettings):
+    BOOTSTRAP_SERVERS: str = "kafka:9092"
+    CLIENT_ID: str = "my-choice-api"
 
 
 class Settings(BaseSettings):
@@ -41,6 +47,7 @@ class Settings(BaseSettings):
     app: AppSettings = AppSettings()
     postgres: PostgresSettings
     deepseek: DeepSeekSettings
+    kafka: KafkaSettings
 
 
 settings = Settings()
