@@ -1,6 +1,6 @@
 import logging
 
-from src.core.novels.exceptions import NovelGenerationError
+from src.core.novels.exceptions import GenerationError
 from src.inbound.kafka.handlers.dependencies import build_novel_composition_service
 from src.outbound.database.dependencies import get_session_scope
 from src.outbound.kafka.schemas.novel_creation import NovelCreateRequested
@@ -16,7 +16,7 @@ async def handle_novel_create_requested(
             service = build_novel_composition_service(session)
             await service.create(payload.prompt)
 
-    except NovelGenerationError as e:
+    except GenerationError as e:
         logger.error(
             "handle_novel_create_requested: %s",
             e,

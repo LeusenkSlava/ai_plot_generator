@@ -6,6 +6,7 @@ from src.core.novels.models import (
     DialogueLine,
     Novel,
     Roadmap,
+    Scene,
 )
 
 
@@ -29,6 +30,13 @@ class RoadmapRepositoryProtocol(Protocol):
     async def delete(self, roadmap_id: int) -> None: ...
 
 
+class SceneRepositoryProtocol(Protocol):
+    async def add(self, scene: Scene) -> Scene: ...
+    async def get_by_id(self, scene_id: int) -> Scene | None: ...
+    async def list_by_roadmap_id(self, roadmap_id: int) -> list[Scene]: ...
+    async def delete(self, scene_id: int) -> None: ...
+
+
 class CharacterRepositoryProtocol(Protocol):
     async def add(self, character: Character) -> Character: ...
     async def get_by_id(self, character_id: int) -> Character | None: ...
@@ -43,7 +51,7 @@ class NovelRepositoryProtocol(Protocol):
     async def delete(self, novel_id: int) -> None: ...
 
 
-class NovelGeneratorProtocol(Protocol):
+class GeneratorProtocol(Protocol):
     async def generate(self, prompt: list) -> dict:
         """Возвращает (title, description) на основе пожелания пользователя."""
         ...

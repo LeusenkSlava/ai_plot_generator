@@ -24,6 +24,7 @@ class Roadmap:
     goal: str
     target_choice: bool
     choice_stakes: str | None
+    scenes_count: int
 
 @dataclass
 class Scene:

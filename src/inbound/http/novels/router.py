@@ -3,7 +3,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from src.core.novels.exceptions import NovelGenerationError
+from src.core.novels.exceptions import GenerationError
 from src.core.novels.services.composition import NovelCompositionService
 from src.core.novels.services.crud import NovelService
 from src.inbound.http.novels.dependencies import (
@@ -25,7 +25,7 @@ async def create_novel(
 ):
     try:
         novel = await service.create(data.prompt)
-    except NovelGenerationError as e:
+    except GenerationError as e:
         logger.error(e)
         raise HTTPException(status_code=502, detail="Failed to generate novel content")
     return novel
@@ -33,6 +33,17 @@ async def create_novel(
 
 @router.get("/{novel_id}", response_model=NovelResponse)
 async def get_novel(
+    novel_id: int,
+    service: Annotated[NovelService, Depends(get_novel_service)],
+):
+    novel = await service.get(novel_id)
+    if novel is None:
+        raise HTTPException(status_code=404, detail="Novel not found")
+    return novel
+
+
+@router.get("/start/{novel_id}", response_model=NovelResponse)
+async def start_novel(
     novel_id: int,
     service: Annotated[NovelService, Depends(get_novel_service)],
 ):

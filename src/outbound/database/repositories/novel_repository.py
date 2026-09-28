@@ -79,6 +79,7 @@ class RoadmapRepository:
             goal=roadmap.goal,
             target_choice=roadmap.target_choice,
             choice_stakes=roadmap.choice_stakes,
+            scenes_count=roadmap.scenes_count,
         )
         self._session.add(db_roadmap)
         await self._session.flush()
@@ -116,6 +117,7 @@ class RoadmapRepository:
             goal=db_roadmap.goal,
             target_choice=db_roadmap.target_choice,
             choice_stakes=db_roadmap.choice_stakes,
+            scenes_count=db_roadmap.scenes_count,
         )
 
 

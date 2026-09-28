@@ -3,7 +3,7 @@ from typing import Annotated
 from fastapi import Depends, Request
 from openai import AsyncOpenAI
 
-from src.outbound.ai.deepseek_client import DeepSeekNovelGenerator
+from src.outbound.ai.deepseek_client import DeepSeekGenerator
 
 
 def get_openai_client(request: Request) -> AsyncOpenAI:
@@ -12,5 +12,5 @@ def get_openai_client(request: Request) -> AsyncOpenAI:
 
 def get_deepseek_generator(
     client: Annotated[AsyncOpenAI, Depends(get_openai_client)],
-) -> DeepSeekNovelGenerator:
-    return DeepSeekNovelGenerator(client)
+) -> DeepSeekGenerator:
+    return DeepSeekGenerator(client)

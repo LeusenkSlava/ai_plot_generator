@@ -38,6 +38,7 @@ class RoadmapModel(BaseModel):
     goal: Mapped[str] = mapped_column(String, nullable=False)
     target_choice: Mapped[bool] = mapped_column(Boolean)
     choice_stakes: Mapped[str | None] = mapped_column(String)
+    scenes_count: Mapped[int] = mapped_column(Integer, nullable=False)
 
     novel: Mapped["NovelModel"] = relationship("NovelModel", back_populates="roadmap")
 
@@ -157,8 +158,9 @@ class DialogueActionModel(BaseModel):
     dialogue_line: Mapped["DialogueLineModel"] = relationship(
         "DialogueLineModel", back_populates="actions"
     )
-    next_roadmap: Mapped["RoadmapModel" | None] = relationship(
-        "RoadmapModel", foreign_keys=[next_roadmap_id]
+    next_roadmap: Mapped["RoadmapModel"] = relationship(
+        "RoadmapModel",
+        foreign_keys=[next_roadmap_id],
     )
 
     def __repr__(self):

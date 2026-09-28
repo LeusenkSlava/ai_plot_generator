@@ -4,6 +4,7 @@ from src.core.novels.interfaces import (
     DialogueLineRepositoryProtocol,
     NovelRepositoryProtocol,
     RoadmapRepositoryProtocol,
+    SceneRepositoryProtocol,
 )
 from src.core.novels.models import (
     Character,
@@ -11,6 +12,7 @@ from src.core.novels.models import (
     DialogueLine,
     Novel,
     Roadmap,
+    Scene,
 )
 
 
@@ -53,6 +55,26 @@ class RoadmapService:
 
     async def delete(self, roadmap_id: int) -> None:
         await self._repository.delete(roadmap_id)
+
+
+class SceneService:
+    def __init__(self, repository: SceneRepositoryProtocol):
+        self._repository = repository
+
+    async def add(self, scene: Scene) -> Scene:
+        scene = await self._repository.add(scene)
+        return scene
+
+    async def get(self, scene_id: int) -> Scene | None:
+        scene = await self._repository.get_by_id(scene_id)
+        return scene
+
+    async def list_by_roadmap(self, roadmap_id: int) -> list[Scene] | None:
+        scenes = await self._repository.list_by_roadmap_id(roadmap_id)
+        return scenes
+
+    async def delete(self, scene_id: int) -> None:
+        await self._repository.delete(scene_id)
 
 
 class NovelService:

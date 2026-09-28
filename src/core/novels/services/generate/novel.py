@@ -1,26 +1,21 @@
 import logging
 
-from src.core.novels.exceptions import NovelGenerationError
-from src.core.novels.interfaces import NovelGeneratorProtocol
+from src.core.novels.interfaces import GeneratorProtocol
 from src.core.novels.models import Novel
 from src.core.novels.services.crud import NovelService
+from src.core.novels.services.generate.base import BaseGenerator
 
 logger = logging.getLogger(__name__)
 
 
-class NovelGenerator:
-    def __init__(self, novel_service: NovelService, generator: NovelGeneratorProtocol):
+class NovelGenerator(BaseGenerator):
+    def __init__(self, novel_service: NovelService, generator: GeneratorProtocol):
+        super().__init__(generator)
         self._novel_service = novel_service
-        self._generator = generator
 
     async def generate(self, user_prompt: str) -> Novel:
-        promt = await self.__create_promt(user_prompt)
-
-        try:
-            data = await self._generator.generate(promt)
-        except Exception as e:
-            logger.error(f"NovelGenerator.generate: {e}")
-            raise NovelGenerationError(str(e))
+        prompt = self.__create_prompt(user_prompt)
+        data = await self._generate(prompt)
 
         novel = Novel(
             id=None,
@@ -34,9 +29,9 @@ class NovelGenerator:
         novel = await self._novel_service.add(novel)
         return novel
 
-    async def __create_promt(self, user_promt: str) -> list[str]:
-        """Создает промт для созданеия новеллы на основе пользовательского промта"""
-        system_promt = {
+    def __create_prompt(self, user_prompt: str) -> list[dict]:
+        """Создает промт для создания новеллы на основе пользовательского промта"""
+        system_prompt = {
             "role": "system",
             "content": (
                 "Ты сценарист интерактивных визуальных новелл."
@@ -57,5 +52,5 @@ class NovelGenerator:
                 """
             ),
         }
-        user_promt = {"role": "user", "content": user_promt}
-        return [system_promt, user_promt]
+        user_prompt = {"role": "user", "content": user_prompt}
+        return [system_prompt, user_prompt]
