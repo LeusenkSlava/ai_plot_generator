@@ -79,3 +79,9 @@ fabric.properties
 
 .env
 .secrets
+CLAUDE.md
+.vscode/
+.venv/
+
+__pycache__/
+*.py[cod]
