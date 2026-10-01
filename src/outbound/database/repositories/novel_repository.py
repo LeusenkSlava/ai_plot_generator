@@ -30,6 +30,7 @@ class CharacterRepository:
             role=character.role,
             arc=character.arc,
             voice_notes=character.voice_notes,
+            codex_character_id=character.codex_character_id,
         )
         self._session.add(db_character)
         await self._session.flush()
@@ -64,6 +65,7 @@ class CharacterRepository:
             role=db_character.role,
             arc=db_character.arc,
             voice_notes=db_character.voice_notes,
+            codex_character_id=db_character.codex_character_id,
         )
 
 
@@ -131,6 +133,8 @@ class SceneRepository:
             title=scene.title,
             description=scene.description,
             order=scene.order,
+            is_final_for_roadmap=scene.is_final_for_roadmap,
+            is_final_for_novel=scene.is_final_for_novel,
         )
         self._session.add(db_scene)
         await self._session.flush()
@@ -166,6 +170,8 @@ class SceneRepository:
             title=db_scene.title,
             description=db_scene.description,
             order=db_scene.order,
+            is_final_for_roadmap=db_scene.is_final_for_roadmap,
+            is_final_for_novel=db_scene.is_final_for_novel,
         )
 
 
@@ -179,6 +185,7 @@ class NovelRepository:
             public_description=novel.public_description,
             description=novel.description,
             tone=novel.tone,
+            universe_id=novel.universe_id,
         )
         self._session.add(db_novel)
         await self._session.flush()
@@ -208,6 +215,7 @@ class NovelRepository:
             public_description=db_novel.public_description,
             description=db_novel.description,
             tone=db_novel.tone,
+            universe_id=db_novel.universe_id,
             created_at=db_novel.created_at,
             updated_at=db_novel.updated_at,
         )
@@ -224,7 +232,11 @@ class DialogueLineRepository:
             character_id=dialog_line.character_id,
             order=dialog_line.order,
             text=dialog_line.text,
-            is_final_for_roadmap=dialog_line.is_final_for_roadmap,
+            is_final_for_scene=dialog_line.is_final_for_scene,
+            background_asset_key=dialog_line.background_asset_key,
+            sprite_asset_key=dialog_line.sprite_asset_key,
+            outfit_asset_key=dialog_line.outfit_asset_key,
+            emotion_asset_key=dialog_line.emotion_asset_key,
         )
         self._session.add(db_dialog_line)
         await self._session.flush()
@@ -269,7 +281,11 @@ class DialogueLineRepository:
             character_id=db_dialog_line.character_id,
             order=db_dialog_line.order,
             text=db_dialog_line.text,
-            is_final_for_roadmap=db_dialog_line.is_final_for_roadmap,
+            is_final_for_scene=db_dialog_line.is_final_for_scene,
+            background_asset_key=db_dialog_line.background_asset_key,
+            sprite_asset_key=db_dialog_line.sprite_asset_key,
+            outfit_asset_key=db_dialog_line.outfit_asset_key,
+            emotion_asset_key=db_dialog_line.emotion_asset_key,
         )
 
 

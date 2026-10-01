@@ -13,8 +13,13 @@ class NovelGenerator(BaseGenerator):
         super().__init__(generator)
         self._novel_service = novel_service
 
-    async def generate(self, user_prompt: str) -> Novel:
-        prompt = self.__create_prompt(user_prompt)
+    async def generate(
+        self,
+        user_prompt: str,
+        universe_id: int | None = None,
+        codex_context: str | None = None,
+    ) -> Novel:
+        prompt = self.__create_prompt(user_prompt, codex_context)
         data = await self._generate(prompt)
 
         novel = Novel(
@@ -23,13 +28,16 @@ class NovelGenerator(BaseGenerator):
             public_description=data["public_description"],
             description=data["description"],
             tone=data["tone"],
+            universe_id=universe_id,
             created_at=None,
             updated_at=None,
         )
         novel = await self._novel_service.add(novel)
         return novel
 
-    def __create_prompt(self, user_prompt: str) -> list[dict]:
+    def __create_prompt(
+        self, user_prompt: str, codex_context: str | None = None
+    ) -> list[dict]:
         """Создает промт для создания новеллы на основе пользовательского промта"""
         system_prompt = {
             "role": "system",
@@ -52,5 +60,11 @@ class NovelGenerator(BaseGenerator):
                 """
             ),
         }
+        if codex_context:
+            system_prompt["content"] += (
+                "\nИстория происходит в существующей вселенной из базы знаний. "
+                "Используй ТОЛЬКО этих персонажей и локации, ничего не выдумывай:\n"
+                + codex_context
+            )
         user_prompt = {"role": "user", "content": user_prompt}
         return [system_prompt, user_prompt]

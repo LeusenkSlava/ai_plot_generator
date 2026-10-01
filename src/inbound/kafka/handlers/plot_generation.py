@@ -14,7 +14,7 @@ async def handle_novel_create_requested(
     try:
         async with get_session_scope() as session:
             service = build_novel_composition_service(session)
-            await service.create(payload.prompt)
+            await service.create(payload.prompt, payload.universe_id)
 
     except GenerationError as e:
         logger.error(

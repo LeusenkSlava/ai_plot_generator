@@ -42,8 +42,9 @@ class RoadmapGenerator(BaseGenerator):
                 step_id=step_id,
                 title=item["title"],
                 goal=item["goal"],
-                target_choice=item["target_choice"],
-                choice_stakes=item.get("choice_stakes"),
+                # MVP: новеллы линейные, развилок не генерируем
+                target_choice=False,
+                choice_stakes=None,
                 scenes_count=item["scenes_count"],
             )
             step = await self._roadmap_service.add(step)
@@ -57,14 +58,12 @@ class RoadmapGenerator(BaseGenerator):
             "content": (
                 "Ты сценарист интерактивных визуальных новелл. "
                 "На основе описания истории и её тона создай роадмап сюжета — "
-                "последовательность шагов, из которых складывается ветвящаяся история. "
+                "последовательность шагов, из которых складывается линейная история без развилок и выборов игрока. "
                 "Количество шагов определи сам исходя из масштаба истории — обычно от 3 до 8. "
                 "Для каждого шага укажи:\n"
                 "1. title - короткое название шага.\n"
                 "2. goal - что должно произойти в сюжете на этом шаге.\n"
-                "3. target_choice - true, если шаг заканчивается развилкой, где игрок делает значимый выбор, иначе false.\n"
-                "4. choice_stakes - если target_choice true, кратко опиши, что поставлено на карту при этом выборе, иначе null.\n"
-                "5. scenes_count - сколько сцен потребуется, чтобы раскрыть этот шаг (обычно от 1 до 4).\n"
+                "3. scenes_count - сколько сцен потребуется, чтобы раскрыть этот шаг (обычно от 1 до 4).\n"
                 "Отвечай СТРОГО в формате JSON, соответствующего этой схеме:\n"
                 """
                 {
@@ -72,8 +71,6 @@ class RoadmapGenerator(BaseGenerator):
                     {
                       "title": string,
                       "goal": string,
-                      "target_choice": boolean,
-                      "choice_stakes": string | null,
                       "scenes_count": integer
                     }
                   ]

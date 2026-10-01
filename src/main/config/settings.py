@@ -33,6 +33,11 @@ class DeepSeekSettings(BaseSettings):
     BASE_URL: str = "https://api.deepseek.com"
 
 
+class CodexSettings(BaseSettings):
+    BASE_URL: str = "http://codex.localhost"
+    TIMEOUT: float = 10.0
+
+
 class KafkaSettings(BaseSettings):
     BOOTSTRAP_SERVERS: str = "kafka:9092"
     CLIENT_ID: str = "my-choice-api"
@@ -48,6 +53,7 @@ class Settings(BaseSettings):
     postgres: PostgresSettings
     deepseek: DeepSeekSettings
     kafka: KafkaSettings
+    codex: CodexSettings = CodexSettings()
 
 
 settings = Settings()

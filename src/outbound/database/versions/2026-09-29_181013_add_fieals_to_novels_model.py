@@ -1,8 +1,8 @@
-"""Add Novel Models
+"""Add fieals to novels model
 
-Revision ID: da692ed35296
+Revision ID: b276e2e696fa
 Revises: 
-Create Date: 2026-08-25 12:57:11.203662
+Create Date: 2026-09-29 18:10:13.702742
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'da692ed35296'
+revision: str = 'b276e2e696fa'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -26,6 +26,7 @@ def upgrade() -> None:
     sa.Column('public_description', sa.String(), nullable=False),
     sa.Column('description', sa.String(), nullable=False),
     sa.Column('tone', sa.String(), nullable=False),
+    sa.Column('universe_id', sa.Integer(), nullable=True),
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
@@ -38,6 +39,7 @@ def upgrade() -> None:
     sa.Column('role', sa.String(), nullable=False),
     sa.Column('arc', sa.String(), nullable=False),
     sa.Column('voice_notes', sa.String(), nullable=False),
+    sa.Column('codex_character_id', sa.Integer(), nullable=True),
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
@@ -52,6 +54,7 @@ def upgrade() -> None:
     sa.Column('goal', sa.String(), nullable=False),
     sa.Column('target_choice', sa.Boolean(), nullable=False),
     sa.Column('choice_stakes', sa.String(), nullable=True),
+    sa.Column('scenes_count', sa.Integer(), nullable=False),
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
@@ -64,6 +67,8 @@ def upgrade() -> None:
     sa.Column('title', sa.String(), nullable=False),
     sa.Column('description', sa.String(), nullable=False),
     sa.Column('order', sa.Integer(), nullable=False),
+    sa.Column('is_final_for_roadmap', sa.Boolean(), nullable=False),
+    sa.Column('is_final_for_novel', sa.Boolean(), nullable=False),
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
@@ -78,7 +83,11 @@ def upgrade() -> None:
     sa.Column('character_id', sa.Integer(), nullable=False),
     sa.Column('order', sa.Integer(), nullable=False),
     sa.Column('text', sa.String(), nullable=False),
-    sa.Column('is_final_for_roadmap', sa.Boolean(), nullable=False),
+    sa.Column('is_final_for_scene', sa.Boolean(), nullable=False),
+    sa.Column('background_asset_key', sa.String(), nullable=True),
+    sa.Column('sprite_asset_key', sa.String(), nullable=True),
+    sa.Column('outfit_asset_key', sa.String(), nullable=True),
+    sa.Column('emotion_asset_key', sa.String(), nullable=True),
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),

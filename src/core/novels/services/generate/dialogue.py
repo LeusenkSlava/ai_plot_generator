@@ -1,12 +1,21 @@
 import logging
+from dataclasses import dataclass, field
+
+from src.core.codex.models import Background, Emotion, Outfit, Sprite
+from src.core.codex.services import CodexService
 
 from src.core.novels.exceptions import GenerationError
 from src.core.novels.interfaces import GeneratorProtocol
-from src.core.novels.models import Character, DialogueAction, DialogueLine, Roadmap, Scene
+from src.core.novels.models import (
+    Character,
+    DialogueLine,
+    Roadmap,
+    Scene,
+)
 from src.core.novels.services.crud import (
     CharacterService,
-    DialogueActionService,
     DialogueLineService,
+    NovelService,
     RoadmapService,
     SceneService,
 )
@@ -15,24 +24,48 @@ from src.core.novels.services.generate.base import BaseGenerator
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class _SpriteAssets:
+    sprite: Sprite
+    outfits: dict[str, Outfit] = field(default_factory=dict)
+    emotions: dict[str, Emotion] = field(default_factory=dict)
+
+
+@dataclass
+class _Assets:
+    """Ассеты из Codex, доступные для сцены: фоны вселенной и спрайты персонажей."""
+
+    backgrounds: dict[str, Background] = field(default_factory=dict)
+    # character.id -> sprite.slug -> ассеты спрайта
+    sprites: dict[int, dict[str, _SpriteAssets]] = field(default_factory=dict)
+
+    def __bool__(self) -> bool:
+        return bool(self.backgrounds or self.sprites)
+
+
 class DialogueGenerator(BaseGenerator):
     def __init__(
         self,
+        novel_service: NovelService,
         scene_service: SceneService,
         roadmap_service: RoadmapService,
         character_service: CharacterService,
         dialogue_line_service: DialogueLineService,
-        dialogue_action_service: DialogueActionService,
+        codex_service: CodexService,
         generator: GeneratorProtocol,
     ):
         super().__init__(generator)
+        self._novel_service = novel_service
+        self._codex_service = codex_service
         self._scene_service = scene_service
         self._roadmap_service = roadmap_service
         self._character_service = character_service
         self._dialogue_line_service = dialogue_line_service
-        self._dialogue_action_service = dialogue_action_service
 
-    async def generate(self, scene_id: int) -> list[DialogueLine]:
+    async def generate(
+        self, scene_id: int, previous_lines: list[DialogueLine] | None = None
+    ) -> list[DialogueLine]:
+        """Диалог сцены. previous_lines — последние реплики перед сценой, чтобы диалог продолжал их."""
         scene = await self._scene_service.get(scene_id)
         if not scene:
             raise GenerationError(f"Scene with id {scene_id} not found")
@@ -46,7 +79,12 @@ class DialogueGenerator(BaseGenerator):
             raise GenerationError(f"No characters found for novel {roadmap.novel_id}")
         characters_by_name = {character.name: character for character in characters}
 
-        prompt = self.__create_prompt(scene, roadmap, characters)
+        novel = await self._novel_service.get(roadmap.novel_id)
+        assets = await self.__load_assets(novel.universe_id if novel else None, characters)
+
+        prompt = self.__create_prompt(
+            scene, roadmap, characters, assets, previous_lines or []
+        )
         data = await self._generate(prompt)
 
         lines_data = data.get("dialogue_lines")
@@ -62,8 +100,6 @@ class DialogueGenerator(BaseGenerator):
                     f"Generator referenced unknown character '{item['character_name']}'"
                 )
 
-            is_final = index == last_index and roadmap.target_choice
-
             dialogue_line = DialogueLine(
                 id=None,
                 created_at=None,
@@ -73,44 +109,96 @@ class DialogueGenerator(BaseGenerator):
                 character_id=character.id,
                 order=index + 1,
                 text=item["text"],
-                is_final_for_roadmap=is_final,
+                is_final_for_scene=index == last_index,
+                **self.__pick_assets(item, character, assets),
             )
             dialogue_line = await self._dialogue_line_service.add(dialogue_line)
-
-            if is_final:
-                for action_index, action_item in enumerate(item.get("actions") or []):
-                    action = DialogueAction(
-                        id=None,
-                        created_at=None,
-                        updated_at=None,
-                        dialogue_line_id=dialogue_line.id,
-                        order=action_index + 1,
-                        text=action_item["text"],
-                        next_roadmap_id=None,
-                    )
-                    await self._dialogue_action_service.add(action)
-
             dialogue_lines.append(dialogue_line)
 
         return dialogue_lines
 
+    async def __load_assets(
+        self, universe_id: int | None, characters: list[Character]
+    ) -> _Assets:
+        assets = _Assets()
+        # Без вселенной в Codex не ходим
+        if universe_id is None:
+            return assets
+        try:
+            assets.backgrounds = {
+                b.slug: b for b in await self._codex_service.get_backgrounds(universe_id)
+            }
+            for character in characters:
+                if character.codex_character_id is None:
+                    continue
+                emotions = await self._codex_service.get_emotions(character.codex_character_id)
+                by_sprite: dict[str, _SpriteAssets] = {}
+                for sprite in await self._codex_service.get_sprites(character.codex_character_id):
+                    outfits = await self._codex_service.get_outfits(sprite.id)
+                    by_sprite[sprite.slug] = _SpriteAssets(
+                        sprite=sprite,
+                        outfits={o.slug: o for o in outfits},
+                        emotions={e.slug: e for e in emotions if e.sprite_id == sprite.id},
+                    )
+                assets.sprites[character.id] = by_sprite
+        except Exception as e:
+            raise GenerationError(f"Codex assets request failed: {e}") from e
+        return assets
+
+    @staticmethod
+    def __pick_assets(item: dict, character: Character, assets: _Assets) -> dict:
+        """Переводит выбранные LLM slug'и в asset_key Codex. Неизвестный slug -> None, а не падение."""
+        picked = {
+            "background_asset_key": None,
+            "sprite_asset_key": None,
+            "outfit_asset_key": None,
+            "emotion_asset_key": None,
+        }
+        if not assets:
+            return picked
+
+        background = assets.backgrounds.get(item.get("background_slug") or "")
+        picked["background_asset_key"] = background.asset_key if background else None
+
+        sprite_assets = assets.sprites.get(character.id, {}).get(item.get("sprite_slug") or "")
+        if sprite_assets:
+            picked["sprite_asset_key"] = sprite_assets.sprite.asset_key
+            outfit = sprite_assets.outfits.get(item.get("outfit_slug") or "")
+            emotion = sprite_assets.emotions.get(item.get("emotion_slug") or "")
+            picked["outfit_asset_key"] = outfit.asset_key if outfit else None
+            picked["emotion_asset_key"] = emotion.asset_key if emotion else None
+
+        missing = [k for k, v in picked.items() if v is None]
+        if missing:
+            logger.warning(f"DialogueGenerator: unresolved assets {missing} for line {item!r}")
+        return picked
+
+    @staticmethod
+    def __assets_catalog(characters: list[Character], assets: _Assets) -> str:
+        lines = ["Фоны (background_slug):"]
+        lines += [f"- {b.slug}: {b.description}" for b in assets.backgrounds.values()]
+        for character in characters:
+            sprites = assets.sprites.get(character.id)
+            if not sprites:
+                continue
+            lines.append(f"Спрайты персонажа {character.name}:")
+            for slug, sa in sprites.items():
+                lines.append(f"- sprite_slug {slug}: {sa.sprite.description}")
+                lines.append(f"  outfit_slug: {', '.join(f'{o.slug} ({o.name})' for o in sa.outfits.values()) or '-'}")
+                lines.append(f"  emotion_slug: {', '.join(f'{e.slug} ({e.name})' for e in sa.emotions.values()) or '-'}")
+        return "\n".join(lines)
+
     def __create_prompt(
-        self, scene: Scene, roadmap: Roadmap, characters: list[Character]
+        self,
+        scene: Scene,
+        roadmap: Roadmap,
+        characters: list[Character],
+        assets: _Assets,
+        previous_lines: list[DialogueLine],
     ) -> list[dict]:
         cast = "\n".join(
             f"- {character.name} ({character.role}): {character.voice_notes}"
             for character in characters
-        )
-
-        choice_instruction = (
-            (
-                "Эта сцена заканчивается развилкой сюжета. "
-                "Последняя реплика должна подвести игрока к выбору, а в поле actions "
-                "укажи 2-3 варианта выбора (только их текст), отражающих то, что поставлено на карту: "
-                f"{roadmap.choice_stakes or roadmap.goal}."
-            )
-            if roadmap.target_choice
-            else "У этой сцены нет развилки, поле actions оставляй пустым у каждой реплики."
         )
 
         system_prompt = {
@@ -120,33 +208,48 @@ class DialogueGenerator(BaseGenerator):
                 "На основе описания сцены и списка персонажей напиши диалог, который в ней происходит. "
                 "Используй только персонажей из списка, ссылаясь на них по имени точно как в списке. "
                 "Количество реплик определи сам исходя из содержания сцены — обычно от 4 до 12. "
-                f"{choice_instruction}\n"
+                "История линейная: не предлагай игроку вариантов выбора.\n"
                 "Для каждой реплики укажи:\n"
                 "1. character_name - имя говорящего персонажа, точно как в списке.\n"
                 "2. text - текст реплики.\n"
-                "3. actions - список вариантов выбора (только для последней реплики, если есть развилка), "
-                "каждый вариант - объект с полем text.\n"
                 "Отвечай СТРОГО в формате JSON, соответствующего этой схеме:\n"
                 """
                 {
                   "dialogue_lines": [
                     {
                       "character_name": string,
-                      "text": string,
-                      "actions": [ { "text": string } ]
+                      "text": string
                     }
                   ]
                 }
                 """
             ),
         }
-        user_prompt = {
-            "role": "user",
-            "content": (
-                f"Сцена: {scene.title}\n"
-                f"Описание сцены: {scene.description}\n"
-                f"Цель шага сюжета: {roadmap.goal}\n"
-                f"Персонажи:\n{cast}"
-            ),
-        }
+        user_content = (
+            f"Сцена: {scene.title}\n"
+            f"Описание сцены: {scene.description}\n"
+            f"Цель шага сюжета: {roadmap.goal}\n"
+            f"Персонажи:\n{cast}"
+        )
+        if previous_lines:
+            names = {character.id: character.name for character in characters}
+            recap = "\n".join(
+                f"{names.get(line.character_id, '?')}: {line.text}" for line in previous_lines
+            )
+            user_content += (
+                f"\n\nПоследние реплики предыдущей сцены (продолжи историю, не повторяя их):\n{recap}"
+            )
+        if assets:
+            system_prompt["content"] += (
+                "\nДля визуала каждой реплики выбери ассеты ТОЛЬКО из каталога ниже, "
+                "указывая slug точно как в каталоге, и добавь в объект реплики поля:\n"
+                "- background_slug - фон, подходящий месту и времени сцены (обычно один на всю сцену, "
+                "меняй только если действие переходит в другое место);\n"
+                "- sprite_slug - спрайт говорящего персонажа;\n"
+                "- outfit_slug - наряд из списка выбранного спрайта;\n"
+                "- emotion_slug - эмоция из списка выбранного спрайта, соответствующая тексту реплики.\n"
+                "Если подходящего ассета нет - ставь null."
+            )
+            user_content += f"\n\nКаталог ассетов:\n{self.__assets_catalog(characters, assets)}"
+        user_prompt = {"role": "user", "content": user_content}
         return [system_prompt, user_prompt]

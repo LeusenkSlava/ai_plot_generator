@@ -14,6 +14,20 @@ volumes:
   postgres_config:
 
 services:
+  migrations:
+    image: ai-plot-generator:local
+    command: alembic upgrade head
+    env_file:
+      - .env
+    depends_on:
+      db_pg:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    networks:
+      - ai_plot_generator
+    restart: "no"
+
   app:
     build:
       context: .
@@ -30,6 +44,8 @@ services:
     depends_on:
       db_pg:
         condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
     restart: on-failure
     volumes:
       - .:/app

@@ -12,6 +12,8 @@ class Character:
     role: str
     arc: str
     voice_notes: str
+    # id персонажа в Codex; только для новелл с universe_id
+    codex_character_id: int | None = None
 
 @dataclass
 class Roadmap:
@@ -36,6 +38,9 @@ class Scene:
     title: str
     description: str
     order: int
+    # последняя сцена шага роадмапа / последняя сцена всей новеллы
+    is_final_for_roadmap: bool = False
+    is_final_for_novel: bool = False
 
 @dataclass
 class Novel:
@@ -47,6 +52,8 @@ class Novel:
     public_description: str
     description: str
     tone: str
+    # id вселенной в Codex; None — вселенная не задана, в Codex не обращаемся
+    universe_id: int | None = None
 
 @dataclass
 class DialogueLine:
@@ -60,7 +67,14 @@ class DialogueLine:
 
     order: int
     text: str
-    is_final_for_roadmap: bool
+    # последняя реплика сцены
+    is_final_for_scene: bool
+
+    # asset_key ассетов Codex; заполняются только для новелл с universe_id
+    background_asset_key: str | None = None
+    sprite_asset_key: str | None = None
+    outfit_asset_key: str | None = None
+    emotion_asset_key: str | None = None
 
 @dataclass
 class DialogueAction:

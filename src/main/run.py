@@ -5,10 +5,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.inbound.http.root_router import make_fastapi_root_router
-from src.inbound.kafka.consumer import consume_loop, consumer
+from src.inbound.kafka.consumer import build_consumer, consume_loop
 from src.main.config.logging import setup_logging
 from src.main.config.settings import settings
 from src.outbound.ai.client import build_deepseek_client, close_deepseek_client
+from src.outbound.codex.client import build_codex_client, close_codex_client
 from src.outbound.database.session import engine
 
 setup_logging()
@@ -16,9 +17,11 @@ setup_logging()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    build_deepseek_client()
+    app.state.openai_client = build_deepseek_client()
+    app.state.codex_client = build_codex_client()
+    consumer = build_consumer()
     await consumer.start()
-    consumer_task = asyncio.create_task(consume_loop())
+    consumer_task = asyncio.create_task(consume_loop(consumer))
 
     yield
 
@@ -29,6 +32,7 @@ async def lifespan(app: FastAPI):
         pass
     await consumer.stop()
     await close_deepseek_client()
+    await close_codex_client()
     await engine.dispose()
 
 
