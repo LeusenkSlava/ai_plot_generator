@@ -8,7 +8,7 @@ class GenerationJobRepository:
     def __init__(self, session: AsyncSession):
         self._session = session
 
-    async def get(self, job_id: str) -> GenerationJobModel | None:
+    async def get(self, job_id: int) -> GenerationJobModel | None:
         result = await self._session.execute(
             select(GenerationJobModel).where(GenerationJobModel.job_id == job_id)
         )
@@ -16,7 +16,7 @@ class GenerationJobRepository:
 
     async def save(
         self,
-        job_id: str,
+        job_id: int,
         status: str,
         result_id: int | None = None,
         error: str | None = None,

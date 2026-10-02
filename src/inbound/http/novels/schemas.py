@@ -1,6 +1,7 @@
 from datetime import datetime
+from typing import Annotated, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class NovelCreateRequest(BaseModel):
@@ -57,3 +58,33 @@ class DialogueStepResponse(BaseModel):
     dialogue: DialogueLineResponse
     scene: SceneResponse
     character: CharacterResponse
+
+
+class PlaybackOkResponse(BaseModel):
+    """Следующая реплика есть."""
+
+    status: Literal["ok"]
+    step: DialogueStepResponse
+
+
+class PlaybackPendingResponse(BaseModel):
+    """Реплики кончились, роадмап не пройден.
+
+    need_generation — нужно отправить команду в ai_plot.scene.generate;
+    generating — сцена уже генерируется.
+    """
+
+    status: Literal["need_generation", "generating"]
+    next_scene_order: int
+
+
+class PlaybackFinishedResponse(BaseModel):
+    """Новелла пройдена до конца."""
+
+    status: Literal["finished"]
+
+
+PlaybackResponse = Annotated[
+    PlaybackOkResponse | PlaybackPendingResponse | PlaybackFinishedResponse,
+    Field(discriminator="status"),
+]

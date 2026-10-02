@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Literal
 
 from src.core.novels.exceptions import (
     CharacterNotFoundError,
@@ -11,10 +12,11 @@ from src.core.novels.interfaces import (
     DialogueLineRepositoryProtocol,
     NovelRepositoryProtocol,
     RoadmapRepositoryProtocol,
+    SceneGenerationLockProtocol,
     SceneRepositoryProtocol,
 )
 from src.core.novels.models import Character, DialogueLine, Scene
-from src.core.novels.services.continuation import NovelContinuationService
+from src.core.novels.services.continuation import next_scene_order
 
 
 @dataclass
@@ -24,10 +26,21 @@ class DialogueStep:
     character: Character
 
 
+PlaybackStatus = Literal["ok", "need_generation", "generating", "finished"]
+
+
+@dataclass
+class PlaybackResult:
+    status: PlaybackStatus
+    step: DialogueStep | None = None
+    next_scene_order: int | None = None
+
+
 class NovelPlaybackService:
     """Проигрывание новеллы: выдаёт реплики по порядку вместе с персонажем.
 
-    Когда сгенерированные реплики заканчиваются, а роадмап ещё не пройден, догенерирует следующую сцену.
+    Только читает из БД. Если реплики кончились, а роадмап не пройден, сообщает номер сцены,
+    которую нужно сгенерировать (генерация идёт через Kafka).
     """
 
     def __init__(
@@ -37,28 +50,20 @@ class NovelPlaybackService:
         scene_repository: SceneRepositoryProtocol,
         dialogue_line_repository: DialogueLineRepositoryProtocol,
         character_repository: CharacterRepositoryProtocol,
-        continuation_service: NovelContinuationService,
+        lock: SceneGenerationLockProtocol,
     ):
         self._novels = novel_repository
         self._roadmaps = roadmap_repository
         self._scenes = scene_repository
         self._dialogue_lines = dialogue_line_repository
         self._characters = character_repository
-        self._continuation = continuation_service
+        self._lock = lock
 
-    async def start(self, novel_id: int) -> DialogueStep | None:
-        """Первая реплика новеллы. None — если в новелле нет реплик."""
-        return await self.next(novel_id, None)
-
-    async def next(
-        self, novel_id: int, dialogue_line_id: int | None
-    ) -> DialogueStep | None:
-        """Реплика, следующая за dialogue_line_id (offset).
-
-        dialogue_line_id=None — начать с начала. None в ответе — новелла закончилась
-        (реплики кончились и весь роадмап пройден).
-        """
-        lines = await self._ordered_lines(novel_id)
+    async def next(self, novel_id: int, dialogue_line_id: int | None) -> PlaybackResult:
+        """Реплика, следующая за dialogue_line_id (offset); None — начать с начала."""
+        if await self._novels.get_by_id(novel_id) is None:
+            raise NovelNotFoundError(novel_id)
+        lines = await self._dialogue_lines.list_by_novel_id(novel_id)
 
         if dialogue_line_id is None:
             index = 0
@@ -72,13 +77,17 @@ class NovelPlaybackService:
             index = position + 1
 
         if index < len(lines):
-            line = lines[index]
-        else:
-            new_lines = await self._continuation.continue_story(novel_id, lines)
-            if not new_lines:
-                return None
-            line = new_lines[0]
+            return PlaybackResult(status="ok", step=await self._step(lines[index]))
 
+        roadmaps = await self._roadmaps.list_by_novel_id(novel_id)
+        scenes = await self._scenes.list_by_novel_id(novel_id)
+        order = next_scene_order(roadmaps, scenes)
+        if order is None:
+            return PlaybackResult(status="finished")
+        status = "generating" if await self._lock.is_locked(novel_id, order) else "need_generation"
+        return PlaybackResult(status=status, next_scene_order=order)
+
+    async def _step(self, line: DialogueLine) -> DialogueStep:
         scene = await self._scenes.get_by_id(line.scene_id)
         if scene is None:
             raise SceneNotFoundError(line.scene_id)
@@ -86,14 +95,3 @@ class NovelPlaybackService:
         if character is None:
             raise CharacterNotFoundError(line.character_id)
         return DialogueStep(dialogue=line, scene=scene, character=character)
-
-    async def _ordered_lines(self, novel_id: int) -> list[DialogueLine]:
-        """Все реплики новеллы: роадмап (step_id) -> сцена (order) -> реплика (order)."""
-        if await self._novels.get_by_id(novel_id) is None:
-            raise NovelNotFoundError(novel_id)
-
-        lines: list[DialogueLine] = []
-        for roadmap in await self._roadmaps.list_by_novel_id(novel_id):
-            for scene in await self._scenes.list_by_roadmap_id(roadmap.id):
-                lines.extend(await self._dialogue_lines.list_by_scene_id(scene.id))
-        return lines

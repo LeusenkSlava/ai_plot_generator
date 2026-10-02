@@ -9,7 +9,7 @@ class GenerationJobModel(BaseModel):
 
     __tablename__ = "generation_jobs"
 
-    job_id: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    job_id: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)
     status: Mapped[str] = mapped_column(String, nullable=False)
     result_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     error: Mapped[str | None] = mapped_column(String, nullable=True)

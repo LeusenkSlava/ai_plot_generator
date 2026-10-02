@@ -2,6 +2,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.codex.services import CodexService
 from src.core.novels.services.composition import NovelCompositionService
+from src.core.novels.services.continuation import SceneContinuationService
 from src.core.novels.services.crud import (
     CharacterService,
     DialogueLineService,
@@ -25,6 +26,9 @@ from src.outbound.database.repositories.novel_repository import (
     NovelRepository,
     RoadmapRepository,
     SceneRepository,
+)
+from src.outbound.database.repositories.scene_generation_lock import (
+    SceneGenerationLock,
 )
 
 
@@ -78,6 +82,48 @@ def build_novel_composition_service(session: AsyncSession) -> NovelCompositionSe
         scene_generator=scene_generator,
         dialogue_generator=dialogue_generator,
         codex_researcher=build_codex_researcher(),
+    )
+
+
+def build_scene_continuation_service(session: AsyncSession) -> SceneContinuationService:
+    novel_repository = NovelRepository(session)
+    character_repository = CharacterRepository(session)
+    roadmap_repository = RoadmapRepository(session)
+    scene_repository = SceneRepository(session)
+    dialogue_line_repository = DialogueLineRepository(session)
+
+    novel_service = NovelService(novel_repository)
+    character_service = CharacterService(character_repository)
+    roadmap_service = RoadmapService(roadmap_repository)
+    scene_service = SceneService(scene_repository)
+    dialogue_line_service = DialogueLineService(dialogue_line_repository)
+
+    generator = DeepSeekGenerator(client=build_deepseek_client())
+    codex_service = CodexService(HttpCodexClient(build_codex_client()))
+    scene_generator = SceneGenerator(
+        novel_service=novel_service,
+        roadmap_service=roadmap_service,
+        scene_service=scene_service,
+        generator=generator,
+    )
+    dialogue_generator = DialogueGenerator(
+        novel_service=novel_service,
+        codex_service=codex_service,
+        scene_service=scene_service,
+        roadmap_service=roadmap_service,
+        character_service=character_service,
+        dialogue_line_service=dialogue_line_service,
+        generator=generator,
+    )
+
+    return SceneContinuationService(
+        novel_repository=novel_repository,
+        roadmap_repository=roadmap_repository,
+        scene_repository=scene_repository,
+        dialogue_line_repository=dialogue_line_repository,
+        scene_generator=scene_generator,
+        dialogue_generator=dialogue_generator,
+        lock=SceneGenerationLock(session),
     )
 
 

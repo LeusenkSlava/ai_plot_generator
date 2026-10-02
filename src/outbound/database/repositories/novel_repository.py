@@ -155,6 +155,16 @@ class SceneRepository:
         )
         return [self._to_domain(s) for s in result.scalars().all()]
 
+    async def list_by_novel_id(self, novel_id: int) -> list[Scene]:
+        """Все сцены новеллы по порядку: шаг роадмапа -> сцена."""
+        result = await self._session.execute(
+            select(SceneModel)
+            .join(RoadmapModel, RoadmapModel.id == SceneModel.roadmap_id)
+            .where(RoadmapModel.novel_id == novel_id)
+            .order_by(RoadmapModel.step_id, SceneModel.order, SceneModel.id)
+        )
+        return [self._to_domain(s) for s in result.scalars().all()]
+
     async def delete(self, scene_id: int) -> None:
         db_scene = await self._session.get(SceneModel, scene_id)
         if db_scene:
@@ -261,10 +271,18 @@ class DialogueLineRepository:
         return self._to_domain(db_dialog_line) if db_dialog_line else None
 
     async def list_by_novel_id(self, novel_id) -> list[DialogueLine]:
+        """Все реплики новеллы в порядке проигрывания: шаг роадмапа -> сцена -> реплика."""
         result = await self._session.execute(
             select(DialogueLineModel)
+            .join(SceneModel, SceneModel.id == DialogueLineModel.scene_id)
+            .join(RoadmapModel, RoadmapModel.id == SceneModel.roadmap_id)
             .where(DialogueLineModel.novel_id == novel_id)
-            .order_by(DialogueLineModel.order)
+            .order_by(
+                RoadmapModel.step_id,
+                SceneModel.order,
+                DialogueLineModel.order,
+                DialogueLineModel.id,
+            )
         )
         return [self._to_domain(r) for r in result.scalars().all()]
 

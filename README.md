@@ -129,15 +129,49 @@ uv run uvicorn src.main.run:app --reload
 | `GET` | `/health` | проверка состояния сервиса |
 
 Как проигрывать новеллу: первый запрос делается без `offset`, дальше в `offset` передаётся `id` последней
-полученной реплики. Если в ответе пришёл `null`, новелла закончилась. Когда нужно догенерировать
-следующую сцену, запрос выполняется долго, потому что ждёт ответа LLM.
+полученной реплики. Ручка только читает из БД и никогда не вызывает LLM. Ответ всегда `200` с полем `status`
+(`404` — нет новеллы или реплики `offset`):
+
+```json
+{"status": "ok", "step": {"dialogue": {...}, "scene": {...}, "character": {...}}}
+{"status": "need_generation", "next_scene_order": 4}
+{"status": "generating", "next_scene_order": 4}
+{"status": "finished"}
+```
+
+`need_generation` — реплики кончились, но роадмап не пройден: нужно отправить в Kafka команду
+`ai_plot.scene.generate` на сцену `next_scene_order` и после `done` повторить запрос с тем же `offset`.
+`generating` — эта сцена уже генерируется.
 
 Генерация новеллы тоже занимает заметное время: это несколько последовательных вызовов LLM.
 
 ## Kafka
 
-Сервис слушает топик `novel.events.create` (consumer group `ai_plot_generator_group`). Формат сообщения:
+Сервис слушает топики `ai_plot.novel.generate` и `ai_plot.scene.generate` (consumer group `ai-plot`)
+и на каждую команду отвечает в `generation.results`.
+
+Сгенерировать новеллу:
 
 ```json
-{"request_id": "abc-123", "prompt": "Детектив в викторианском Лондоне", "universe_id": null}
+{"job_id": 123, "prompt": "Детектив в викторианском Лондоне", "universe_id": null}
 ```
+
+Сгенерировать следующую сцену (`scene_order` — сквозной номер сцены в новелле с 1, его отдаёт
+`GET /novels/start/...` в `next_scene_order`):
+
+```json
+{"job_id": 124, "novel_id": 42, "scene_order": 4}
+```
+
+Результат (`result_id` — id новеллы или сцены):
+
+```json
+{"job_id": 124, "status": "done", "result_id": 987}
+{"job_id": 124, "status": "failed", "error": "LLM timeout"}
+```
+
+Результат отправляется после коммита. Повторная доставка того же `job_id` переотправляет сохранённый
+результат. Генерация сцены идемпотентна по `(novel_id, scene_order)`: уже готовая сцена сразу даёт `done`,
+а команда на сцену, которая генерируется прямо сейчас, ждёт окончания (advisory-блокировка Postgres) и тоже
+получает `done`. Ошибки сцены: `novel_finished` — роадмап пройден; сцена не по порядку — предыдущая
+ещё не сгенерирована.

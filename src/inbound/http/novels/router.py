@@ -5,7 +5,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.core.novels.exceptions import (
     DialogueLineNotFoundError,
-    GenerationError,
     NovelNotFoundError,
 )
 from src.core.novels.services.crud import NovelService
@@ -15,9 +14,9 @@ from src.inbound.http.novels.dependencies import (
     get_novel_service,
 )
 from src.inbound.http.novels.schemas import (
-    DialogueStepResponse,
     NovelListResponse,
     NovelResponse,
+    PlaybackResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -37,7 +36,11 @@ async def get_novel(
     return novel
 
 
-@router.get("/start/{novel_id}", response_model=DialogueStepResponse | None)
+@router.get(
+    "/start/{novel_id}",
+    response_model=PlaybackResponse,
+    responses={404: {"description": "Novel or dialogue line (offset) not found"}},
+)
 async def start_novel(
     novel_id: int,
     service: Annotated[NovelPlaybackService, Depends(get_novel_playback_service)],
@@ -45,21 +48,24 @@ async def start_novel(
 ):
     """offset — id последней показанной реплики; без него новелла начинается с начала.
 
-    Если реплики кончились, а роадмап не пройден — догенерирует следующую сцену (долгий запрос).
-    null в ответе — новелла закончилась.
+    Только читает из БД, LLM не вызывает. status:
+    - ok — следующая реплика в step;
+    - need_generation — реплики кончились, нужно отправить в Kafka-топик ai_plot.scene.generate
+      команду на генерацию сцены next_scene_order;
+    - generating — сцена next_scene_order уже генерируется;
+    - finished — новелла пройдена до конца.
     """
     try:
-        step = await service.next(novel_id, offset)
+        result = await service.next(novel_id, offset)
     except NovelNotFoundError:
         raise HTTPException(status_code=404, detail="Novel not found")
     except DialogueLineNotFoundError:
         raise HTTPException(status_code=404, detail="Dialogue line not found")
-    except GenerationError as e:
-        logger.error(e)
-        raise HTTPException(status_code=502, detail="Failed to generate next scene")
-    if step is None and offset is None:
-        raise HTTPException(status_code=404, detail="Novel has no dialogue")
-    return step
+    if result.status == "ok":
+        return {"status": "ok", "step": result.step}
+    if result.status == "finished":
+        return {"status": "finished"}
+    return {"status": result.status, "next_scene_order": result.next_scene_order}
 
 
 @router.get("/", response_model=NovelListResponse)
