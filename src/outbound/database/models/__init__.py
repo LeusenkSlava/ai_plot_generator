@@ -1,3 +1,4 @@
+from .generation_jobs import GenerationJobModel
 from .novels import (
     CharacterModel,
     DialogueActionModel,
@@ -8,6 +9,7 @@ from .novels import (
 )
 
 __all__ = (
+    "GenerationJobModel",
     "RoadmapModel",
     "DialogueActionModel",
     "CharacterModel",

@@ -3,27 +3,21 @@ from typing import Annotated
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.novels.services.composition import NovelCompositionService
+from src.core.codex.services import CodexService
 from src.core.novels.services.continuation import NovelContinuationService
 from src.core.novels.services.crud import (
     CharacterService,
-    DialogueActionService,
     DialogueLineService,
     NovelService,
     RoadmapService,
     SceneService,
 )
-from src.core.novels.services.generate.character import CharacterGenerator
 from src.core.novels.services.generate.dialogue import DialogueGenerator
-from src.core.novels.services.generate.novel import NovelGenerator
-from src.core.novels.services.generate.roadmap import RoadmapGenerator
 from src.core.novels.services.generate.scene import SceneGenerator
 from src.core.novels.services.playback import NovelPlaybackService
-from src.core.codex.services import CodexService
-from src.outbound.ai.codex_agent import CodexResearcher
-from src.outbound.codex.dependencies import get_codex_service
 from src.outbound.ai.deepseek_client import DeepSeekGenerator
-from src.outbound.ai.dependencies import get_codex_researcher, get_deepseek_generator
+from src.outbound.ai.dependencies import get_deepseek_generator
+from src.outbound.codex.dependencies import get_codex_service
 from src.outbound.database.dependencies import get_db_session
 from src.outbound.database.repositories.novel_repository import (
     CharacterRepository,
@@ -103,47 +97,6 @@ def get_dialogue_line_service(
     return DialogueLineService(repository)
 
 
-def get_dialogue_action_service(
-    repository: Annotated[
-        DialogueActionRepository, Depends(get_dialogue_action_repository)
-    ],
-) -> DialogueActionService:
-    return DialogueActionService(repository)
-
-
-def get_novel_generator(
-    novel_service: Annotated[NovelService, Depends(get_novel_service)],
-    generator: Annotated[DeepSeekGenerator, Depends(get_deepseek_generator)],
-) -> NovelGenerator:
-    return NovelGenerator(generator=generator, novel_service=novel_service)
-
-
-def get_character_generator(
-    novel_service: Annotated[NovelService, Depends(get_novel_service)],
-    character_service: Annotated[CharacterService, Depends(get_character_service)],
-    codex_service: Annotated[CodexService, Depends(get_codex_service)],
-    generator: Annotated[DeepSeekGenerator, Depends(get_deepseek_generator)],
-) -> CharacterGenerator:
-    return CharacterGenerator(
-        novel_service=novel_service,
-        character_service=character_service,
-        codex_service=codex_service,
-        generator=generator,
-    )
-
-
-def get_roadmap_generator(
-    novel_service: Annotated[NovelService, Depends(get_novel_service)],
-    roadmap_service: Annotated[RoadmapService, Depends(get_roadmap_service)],
-    generator: Annotated[DeepSeekGenerator, Depends(get_deepseek_generator)],
-) -> RoadmapGenerator:
-    return RoadmapGenerator(
-        novel_service=novel_service,
-        roadmap_service=roadmap_service,
-        generator=generator,
-    )
-
-
 def get_scene_generator(
     novel_service: Annotated[NovelService, Depends(get_novel_service)],
     roadmap_service: Annotated[RoadmapService, Depends(get_roadmap_service)],
@@ -177,26 +130,6 @@ def get_dialogue_generator(
         character_service=character_service,
         dialogue_line_service=dialogue_line_service,
         generator=generator,
-    )
-
-
-def get_novel_composition_service(
-    novel_generator: Annotated[NovelGenerator, Depends(get_novel_generator)],
-    character_generator: Annotated[
-        CharacterGenerator, Depends(get_character_generator)
-    ],
-    roadmap_generator: Annotated[RoadmapGenerator, Depends(get_roadmap_generator)],
-    scene_generator: Annotated[SceneGenerator, Depends(get_scene_generator)],
-    dialogue_generator: Annotated[DialogueGenerator, Depends(get_dialogue_generator)],
-    codex_researcher: Annotated[CodexResearcher, Depends(get_codex_researcher)],
-) -> NovelCompositionService:
-    return NovelCompositionService(
-        novel_generator=novel_generator,
-        character_generator=character_generator,
-        roadmap_generator=roadmap_generator,
-        scene_generator=scene_generator,
-        dialogue_generator=dialogue_generator,
-        codex_researcher=codex_researcher,
     )
 
 

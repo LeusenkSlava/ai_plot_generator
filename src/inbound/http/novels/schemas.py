@@ -19,6 +19,13 @@ class NovelResponse(BaseModel):
     universe_id: int | None
 
 
+class NovelListResponse(BaseModel):
+    items: list[NovelResponse]
+    total: int
+    limit: int
+    offset: int
+
+
 class CharacterResponse(BaseModel):
     id: int
     name: str

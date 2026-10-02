@@ -1,24 +1,22 @@
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.core.novels.exceptions import (
     DialogueLineNotFoundError,
     GenerationError,
     NovelNotFoundError,
 )
-from src.core.novels.services.composition import NovelCompositionService
 from src.core.novels.services.crud import NovelService
 from src.core.novels.services.playback import NovelPlaybackService
 from src.inbound.http.novels.dependencies import (
-    get_novel_composition_service,
     get_novel_playback_service,
     get_novel_service,
 )
 from src.inbound.http.novels.schemas import (
     DialogueStepResponse,
-    NovelCreateRequest,
+    NovelListResponse,
     NovelResponse,
 )
 
@@ -26,20 +24,6 @@ logger = logging.getLogger(__name__)
 
 
 router = APIRouter(prefix="/novels", tags=["novels"])
-
-
-@router.post("/", response_model=NovelResponse)
-async def create_novel(
-    data: NovelCreateRequest,
-    service: Annotated[NovelCompositionService, Depends(get_novel_composition_service)],
-):
-    try:
-        logger.info(f"create_novel: {data.prompt}, {data.universe_id}")
-        novel = await service.create(data.prompt, data.universe_id)
-    except GenerationError as e:
-        logger.error(e)
-        raise HTTPException(status_code=502, detail="Failed to generate novel content")
-    return novel
 
 
 @router.get("/{novel_id}", response_model=NovelResponse)
@@ -78,11 +62,14 @@ async def start_novel(
     return step
 
 
-@router.get("/", response_model=list[NovelResponse])
+@router.get("/", response_model=NovelListResponse)
 async def list_novels(
     service: Annotated[NovelService, Depends(get_novel_service)],
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ):
-    return await service.list()
+    novels, total = await service.list(limit=limit, offset=offset)
+    return {"items": novels, "total": total, "limit": limit, "offset": offset}
 
 
 @router.delete("/{novel_id}", status_code=204)

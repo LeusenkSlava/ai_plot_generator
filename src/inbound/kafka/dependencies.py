@@ -1,5 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.codex.services import CodexService
 from src.core.novels.services.composition import NovelCompositionService
 from src.core.novels.services.crud import (
     CharacterService,
@@ -13,7 +14,6 @@ from src.core.novels.services.generate.dialogue import DialogueGenerator
 from src.core.novels.services.generate.novel import NovelGenerator
 from src.core.novels.services.generate.roadmap import RoadmapGenerator
 from src.core.novels.services.generate.scene import SceneGenerator
-from src.core.codex.services import CodexService
 from src.outbound.ai.client import build_deepseek_client
 from src.outbound.ai.codex_agent import CodexResearcher
 from src.outbound.ai.deepseek_client import DeepSeekGenerator

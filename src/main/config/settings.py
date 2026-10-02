@@ -40,7 +40,8 @@ class CodexSettings(BaseSettings):
 
 class KafkaSettings(BaseSettings):
     BOOTSTRAP_SERVERS: str = "kafka:9092"
-    CLIENT_ID: str = "my-choice-api"
+    CLIENT_ID: str = "ai_plot_generator_client"
+    GROUP_ID: str = "ai-plot"
 
 
 class Settings(BaseSettings):

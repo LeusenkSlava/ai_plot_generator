@@ -6,6 +6,7 @@ from src.main.config.settings import settings
 
 def setup_logging() -> None:
     log_level = settings.app.LOGGING_LEVEL
+    print(f"Logging level set to {log_level}")
 
     handler = logging.StreamHandler(sys.stdout)
     formatter = logging.Formatter(
@@ -13,6 +14,7 @@ def setup_logging() -> None:
         datefmt="%Y-%m-%d %H:%M:%S",
     )
     handler.setFormatter(formatter)
+    handler.setLevel(log_level)
 
     root_logger = logging.getLogger()
     root_logger.setLevel(log_level)

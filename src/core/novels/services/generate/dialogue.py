@@ -3,7 +3,6 @@ from dataclasses import dataclass, field
 
 from src.core.codex.models import Background, Emotion, Outfit, Sprite
 from src.core.codex.services import CodexService
-
 from src.core.novels.exceptions import GenerationError
 from src.core.novels.interfaces import GeneratorProtocol
 from src.core.novels.models import (
@@ -80,7 +79,9 @@ class DialogueGenerator(BaseGenerator):
         characters_by_name = {character.name: character for character in characters}
 
         novel = await self._novel_service.get(roadmap.novel_id)
-        assets = await self.__load_assets(novel.universe_id if novel else None, characters)
+        assets = await self.__load_assets(
+            novel.universe_id if novel else None, characters
+        )
 
         prompt = self.__create_prompt(
             scene, roadmap, characters, assets, previous_lines or []
@@ -126,19 +127,26 @@ class DialogueGenerator(BaseGenerator):
             return assets
         try:
             assets.backgrounds = {
-                b.slug: b for b in await self._codex_service.get_backgrounds(universe_id)
+                b.slug: b
+                for b in await self._codex_service.get_backgrounds(universe_id)
             }
             for character in characters:
                 if character.codex_character_id is None:
                     continue
-                emotions = await self._codex_service.get_emotions(character.codex_character_id)
+                emotions = await self._codex_service.get_emotions(
+                    character.codex_character_id
+                )
                 by_sprite: dict[str, _SpriteAssets] = {}
-                for sprite in await self._codex_service.get_sprites(character.codex_character_id):
+                for sprite in await self._codex_service.get_sprites(
+                    character.codex_character_id
+                ):
                     outfits = await self._codex_service.get_outfits(sprite.id)
                     by_sprite[sprite.slug] = _SpriteAssets(
                         sprite=sprite,
                         outfits={o.slug: o for o in outfits},
-                        emotions={e.slug: e for e in emotions if e.sprite_id == sprite.id},
+                        emotions={
+                            e.slug: e for e in emotions if e.sprite_id == sprite.id
+                        },
                     )
                 assets.sprites[character.id] = by_sprite
         except Exception as e:
@@ -160,7 +168,9 @@ class DialogueGenerator(BaseGenerator):
         background = assets.backgrounds.get(item.get("background_slug") or "")
         picked["background_asset_key"] = background.asset_key if background else None
 
-        sprite_assets = assets.sprites.get(character.id, {}).get(item.get("sprite_slug") or "")
+        sprite_assets = assets.sprites.get(character.id, {}).get(
+            item.get("sprite_slug") or ""
+        )
         if sprite_assets:
             picked["sprite_asset_key"] = sprite_assets.sprite.asset_key
             outfit = sprite_assets.outfits.get(item.get("outfit_slug") or "")
@@ -170,7 +180,9 @@ class DialogueGenerator(BaseGenerator):
 
         missing = [k for k, v in picked.items() if v is None]
         if missing:
-            logger.warning(f"DialogueGenerator: unresolved assets {missing} for line {item!r}")
+            logger.warning(
+                f"DialogueGenerator: unresolved assets {missing} for line {item!r}"
+            )
         return picked
 
     @staticmethod
@@ -184,8 +196,12 @@ class DialogueGenerator(BaseGenerator):
             lines.append(f"Спрайты персонажа {character.name}:")
             for slug, sa in sprites.items():
                 lines.append(f"- sprite_slug {slug}: {sa.sprite.description}")
-                lines.append(f"  outfit_slug: {', '.join(f'{o.slug} ({o.name})' for o in sa.outfits.values()) or '-'}")
-                lines.append(f"  emotion_slug: {', '.join(f'{e.slug} ({e.name})' for e in sa.emotions.values()) or '-'}")
+                lines.append(
+                    f"  outfit_slug: {', '.join(f'{o.slug} ({o.name})' for o in sa.outfits.values()) or '-'}"
+                )
+                lines.append(
+                    f"  emotion_slug: {', '.join(f'{e.slug} ({e.name})' for e in sa.emotions.values()) or '-'}"
+                )
         return "\n".join(lines)
 
     def __create_prompt(
@@ -234,11 +250,10 @@ class DialogueGenerator(BaseGenerator):
         if previous_lines:
             names = {character.id: character.name for character in characters}
             recap = "\n".join(
-                f"{names.get(line.character_id, '?')}: {line.text}" for line in previous_lines
+                f"{names.get(line.character_id, '?')}: {line.text}"
+                for line in previous_lines
             )
-            user_content += (
-                f"\n\nПоследние реплики предыдущей сцены (продолжи историю, не повторяя их):\n{recap}"
-            )
+            user_content += f"\n\nПоследние реплики предыдущей сцены (продолжи историю, не повторяя их):\n{recap}"
         if assets:
             system_prompt["content"] += (
                 "\nДля визуала каждой реплики выбери ассеты ТОЛЬКО из каталога ниже, "
@@ -250,6 +265,8 @@ class DialogueGenerator(BaseGenerator):
                 "- emotion_slug - эмоция из списка выбранного спрайта, соответствующая тексту реплики.\n"
                 "Если подходящего ассета нет - ставь null."
             )
-            user_content += f"\n\nКаталог ассетов:\n{self.__assets_catalog(characters, assets)}"
+            user_content += (
+                f"\n\nКаталог ассетов:\n{self.__assets_catalog(characters, assets)}"
+            )
         user_prompt = {"role": "user", "content": user_content}
         return [system_prompt, user_prompt]

@@ -1,17 +1,16 @@
+from typing import Literal
+
 from pydantic import BaseModel
 
 
-class NovelCreateRequested(BaseModel):
-    request_id: str
+class NovelGenerateRequested(BaseModel):
+    job_id: str
     prompt: str
     universe_id: int | None = None
 
 
-class NovelCreated(BaseModel):
-    request_id: str
-    novel_id: str
-
-
-class NovelCreationFailed(BaseModel):
-    request_id: str
-    reason: str
+class GenerationResult(BaseModel):
+    job_id: int | str
+    status: Literal["done", "failed"]
+    result_id: int | None = None
+    error: str | None = None

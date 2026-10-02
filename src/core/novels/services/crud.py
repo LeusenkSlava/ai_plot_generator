@@ -89,9 +89,10 @@ class NovelService:
         novel = await self._repository.get_by_id(novel_id)
         return novel
 
-    async def list(self) -> list[Novel] | None:
-        novels = await self._repository.list_all()
-        return novels
+    async def list(self, limit: int, offset: int) -> tuple[list[Novel], int]:
+        novels = await self._repository.list_all(limit=limit, offset=offset)
+        total = await self._repository.count()
+        return novels, total
 
     async def delete(self, novel_id: int) -> None:
         await self._repository.delete(novel_id)

@@ -1,4 +1,4 @@
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.novels.models import (
@@ -198,9 +198,20 @@ class NovelRepository:
         db_novel = result.scalar_one_or_none()
         return self._to_domain(db_novel) if db_novel else None
 
-    async def list_all(self) -> list[Novel]:
-        result = await self._session.execute(select(NovelModel))
+    async def list_all(self, limit: int, offset: int) -> list[Novel]:
+        result = await self._session.execute(
+            select(NovelModel)
+            .order_by(NovelModel.created_at.desc(), NovelModel.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
         return [self._to_domain(n) for n in result.scalars().all()]
+
+    async def count(self) -> int:
+        result = await self._session.execute(
+            select(func.count()).select_from(NovelModel)
+        )
+        return result.scalar_one()
 
     async def delete(self, novel_id: int) -> None:
         db_novel = await self._session.get(NovelModel, novel_id)

@@ -2,7 +2,6 @@ import logging
 
 from src.core.codex.interfaces import CodexResearcherProtocol
 from src.core.novels.exceptions import GenerationError
-
 from src.core.novels.models import Novel
 from src.core.novels.services.generate.character import CharacterGenerator
 from src.core.novels.services.generate.dialogue import DialogueGenerator
@@ -31,15 +30,17 @@ class NovelCompositionService:
         self._codex_researcher = codex_researcher
 
     async def create(self, user_promt: str, universe_id: int | None = None) -> Novel:
-        # Без universe_id в Codex не ходим: вселенной, персонажей и фонов там нет
         codex_context = None
         if universe_id is not None:
             try:
                 codex_context = await self._codex_researcher.research(
-                    user_promt, universe_id
+                    user_promt,
+                    universe_id,
                 )
             except Exception as e:
-                logger.error(f"NovelCompositionService.create: codex research failed: {e}")
+                logger.error(
+                    f"NovelCompositionService.create: codex research failed: {e}"
+                )
                 raise GenerationError(f"Codex research failed: {e}") from e
 
         novel = await self._novel_generator.generate(
