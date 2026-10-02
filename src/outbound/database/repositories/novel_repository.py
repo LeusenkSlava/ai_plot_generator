@@ -135,6 +135,7 @@ class SceneRepository:
             order=scene.order,
             is_final_for_roadmap=scene.is_final_for_roadmap,
             is_final_for_novel=scene.is_final_for_novel,
+            story_context=scene.story_context,
         )
         self._session.add(db_scene)
         await self._session.flush()
@@ -165,6 +166,12 @@ class SceneRepository:
         )
         return [self._to_domain(s) for s in result.scalars().all()]
 
+    async def update_story_context(self, scene_id: int, story_context: str) -> None:
+        db_scene = await self._session.get(SceneModel, scene_id)
+        if db_scene:
+            db_scene.story_context = story_context
+            await self._session.flush()
+
     async def delete(self, scene_id: int) -> None:
         db_scene = await self._session.get(SceneModel, scene_id)
         if db_scene:
@@ -182,6 +189,7 @@ class SceneRepository:
             order=db_scene.order,
             is_final_for_roadmap=db_scene.is_final_for_roadmap,
             is_final_for_novel=db_scene.is_final_for_novel,
+            story_context=db_scene.story_context,
         )
 
 

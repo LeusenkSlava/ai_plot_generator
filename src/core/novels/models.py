@@ -41,6 +41,9 @@ class Scene:
     # последняя сцена шага роадмапа / последняя сцена всей новеллы
     is_final_for_roadmap: bool = False
     is_final_for_novel: bool = False
+    # изложение истории после этой сцены: сюжетные факты и внешность/одежда персонажей.
+    # Передаётся в генерацию следующей сцены и пересобирается после неё
+    story_context: str | None = None
 
 @dataclass
 class Novel:

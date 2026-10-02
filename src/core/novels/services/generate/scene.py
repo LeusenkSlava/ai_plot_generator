@@ -23,9 +23,13 @@ class SceneGenerator(BaseGenerator):
         self._scene_service = scene_service
 
     async def generate(
-        self, roadmap_id: int, previous_scenes: list[Scene] | None = None
+        self,
+        roadmap_id: int,
+        previous_scenes: list[Scene] | None = None,
+        story_context: str | None = None,
     ) -> Scene:
-        """Следующая сцена шага роадмапа. previous_scenes — уже сыгранные сцены новеллы для связности."""
+        """Следующая сцена шага роадмапа. previous_scenes — уже сыгранные сцены новеллы для связности,
+        story_context — изложение истории после предыдущей сцены."""
         roadmap = await self._roadmap_service.get(roadmap_id)
         if not roadmap:
             raise GenerationError(f"Roadmap with id {roadmap_id} not found")
@@ -40,7 +44,9 @@ class SceneGenerator(BaseGenerator):
         roadmaps = await self._roadmap_service.list_by_novel(novel.id) or []
         is_last_roadmap = roadmap.step_id >= max((r.step_id for r in roadmaps), default=0)
 
-        prompt = self.__create_prompt(novel, roadmap, order, previous_scenes or [])
+        prompt = self.__create_prompt(
+            novel, roadmap, order, previous_scenes or [], story_context
+        )
         data = await self._generate(prompt)
 
         scene = Scene(
@@ -58,7 +64,12 @@ class SceneGenerator(BaseGenerator):
         return scene
 
     def __create_prompt(
-        self, novel: Novel, roadmap: Roadmap, order: int, previous_scenes: list[Scene]
+        self,
+        novel: Novel,
+        roadmap: Roadmap,
+        order: int,
+        previous_scenes: list[Scene],
+        story_context: str | None,
     ) -> list[dict]:
         scenes_count = max(roadmap.scenes_count, order)
         system_prompt = {
@@ -97,4 +108,9 @@ class SceneGenerator(BaseGenerator):
                 f"- {scene.title}: {scene.description}" for scene in previous_scenes
             )
             user_prompt["content"] += f"\n\nПредыдущие сцены:\n{story_so_far}"
+        if story_context:
+            user_prompt["content"] += (
+                "\n\nИзложение истории на данный момент (сцена не должна ему противоречить; "
+                f"одежду персонажей не меняй без сюжетной причины):\n{story_context}"
+            )
         return [system_prompt, user_prompt]

@@ -62,9 +62,13 @@ class DialogueGenerator(BaseGenerator):
         self._dialogue_line_service = dialogue_line_service
 
     async def generate(
-        self, scene_id: int, previous_lines: list[DialogueLine] | None = None
+        self,
+        scene_id: int,
+        previous_lines: list[DialogueLine] | None = None,
+        story_context: str | None = None,
     ) -> list[DialogueLine]:
-        """Диалог сцены. previous_lines — последние реплики перед сценой, чтобы диалог продолжал их."""
+        """Диалог сцены. previous_lines — последние реплики перед сценой, чтобы диалог продолжал их,
+        story_context — изложение истории после предыдущей сцены."""
         scene = await self._scene_service.get(scene_id)
         if not scene:
             raise GenerationError(f"Scene with id {scene_id} not found")
@@ -83,8 +87,26 @@ class DialogueGenerator(BaseGenerator):
             novel.universe_id if novel else None, characters
         )
 
+        # Наряды берём по всей новелле: персонаж мог не говорить в последних репликах
+        novel_lines = (
+            await self._dialogue_line_service.list_by_novel(roadmap.novel_id) or []
+            if assets
+            else []
+        )
+        current_outfits = self.__current_outfits(
+            characters,
+            assets,
+            [line for line in novel_lines if line.scene_id != scene.id],
+        )
+
         prompt = self.__create_prompt(
-            scene, roadmap, characters, assets, previous_lines or []
+            scene,
+            roadmap,
+            characters,
+            assets,
+            previous_lines or [],
+            story_context,
+            current_outfits,
         )
         data = await self._generate(prompt)
 
@@ -186,6 +208,25 @@ class DialogueGenerator(BaseGenerator):
         return picked
 
     @staticmethod
+    def __current_outfits(
+        characters: list[Character], assets: _Assets, lines: list[DialogueLine]
+    ) -> str:
+        """Последний наряд каждого персонажа по репликам: asset_key -> slug каталога."""
+        outfits: dict[int, str] = {}
+        for line in lines:
+            if not line.outfit_asset_key:
+                continue
+            for sprite_slug, sa in assets.sprites.get(line.character_id, {}).items():
+                for outfit in sa.outfits.values():
+                    if outfit.asset_key == line.outfit_asset_key:
+                        outfits[line.character_id] = (
+                            f"sprite_slug {sprite_slug}, outfit_slug {outfit.slug} ({outfit.name})"
+                        )
+        return "\n".join(
+            f"- {c.name}: {outfits[c.id]}" for c in characters if c.id in outfits
+        )
+
+    @staticmethod
     def __assets_catalog(characters: list[Character], assets: _Assets) -> str:
         lines = ["Фоны (background_slug):"]
         lines += [f"- {b.slug}: {b.description}" for b in assets.backgrounds.values()]
@@ -211,6 +252,8 @@ class DialogueGenerator(BaseGenerator):
         characters: list[Character],
         assets: _Assets,
         previous_lines: list[DialogueLine],
+        story_context: str | None,
+        current_outfits: str,
     ) -> list[dict]:
         cast = "\n".join(
             f"- {character.name} ({character.role}): {character.voice_notes}"
@@ -247,6 +290,12 @@ class DialogueGenerator(BaseGenerator):
             f"Цель шага сюжета: {roadmap.goal}\n"
             f"Персонажи:\n{cast}"
         )
+        if story_context:
+            user_content += (
+                "\n\nИзложение истории на данный момент (не противоречь ему, "
+                "персонажи одеты так, как в нём указано, пока по сюжету не переоденутся):\n"
+                f"{story_context}"
+            )
         if previous_lines:
             names = {character.id: character.name for character in characters}
             recap = "\n".join(
@@ -268,5 +317,12 @@ class DialogueGenerator(BaseGenerator):
             user_content += (
                 f"\n\nКаталог ассетов:\n{self.__assets_catalog(characters, assets)}"
             )
+            if current_outfits:
+                system_prompt["content"] += (
+                    "\nНаряд персонажа не меняется между репликами и сценами: используй его текущий "
+                    "outfit_slug, пока по сюжету персонаж явно не переоделся."
+                )
+                user_content += f"\n\nТекущие наряды персонажей:\n{current_outfits}"
+
         user_prompt = {"role": "user", "content": user_content}
         return [system_prompt, user_prompt]

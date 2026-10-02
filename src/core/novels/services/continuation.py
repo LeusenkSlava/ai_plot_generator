@@ -15,6 +15,7 @@ from src.core.novels.interfaces import (
 from src.core.novels.models import Roadmap, Scene
 from src.core.novels.services.generate.dialogue import DialogueGenerator
 from src.core.novels.services.generate.scene import SceneGenerator
+from src.core.novels.services.generate.story_context import StoryContextGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +61,7 @@ class SceneContinuationService:
         dialogue_line_repository: DialogueLineRepositoryProtocol,
         scene_generator: SceneGenerator,
         dialogue_generator: DialogueGenerator,
+        story_context_generator: StoryContextGenerator,
         lock: SceneGenerationLockProtocol,
     ):
         self._novels = novel_repository
@@ -68,6 +70,7 @@ class SceneContinuationService:
         self._dialogue_lines = dialogue_line_repository
         self._scene_generator = scene_generator
         self._dialogue_generator = dialogue_generator
+        self._story_context_generator = story_context_generator
         self._lock = lock
 
     async def generate(self, novel_id: int, scene_order: int) -> tuple[Scene, bool]:
@@ -106,6 +109,10 @@ class SceneContinuationService:
             raise SceneOrderError(novel_id, scene_order, expected)
 
         roadmap = _next_roadmap(roadmaps, scenes)
+        # Изложение истории после последней сцены, у которой оно есть
+        story_context = next(
+            (s.story_context for s in reversed(scenes) if s.story_context), None
+        )
         logger.info(
             "Scene generation: novel_id=%s scene_order=%s generating scene, step_id=%s",
             novel_id,
@@ -113,7 +120,9 @@ class SceneContinuationService:
             roadmap.step_id,
         )
         scene = await self._scene_generator.generate(
-            roadmap.id, previous_scenes=scenes[-PREVIOUS_SCENES_LIMIT:]
+            roadmap.id,
+            previous_scenes=scenes[-PREVIOUS_SCENES_LIMIT:],
+            story_context=story_context,
         )
 
         logger.info(
@@ -125,7 +134,19 @@ class SceneContinuationService:
         previous_lines = await self._dialogue_lines.list_by_novel_id(novel_id)
         previous_lines = [line for line in previous_lines if line.scene_id != scene.id]
         await self._dialogue_generator.generate(
-            scene.id, previous_lines=previous_lines[-PREVIOUS_LINES_LIMIT:]
+            scene.id,
+            previous_lines=previous_lines[-PREVIOUS_LINES_LIMIT:],
+            story_context=story_context,
+        )
+
+        logger.info(
+            "Scene generation: novel_id=%s scene_order=%s updating story context, scene_id=%s",
+            novel_id,
+            scene_order,
+            scene.id,
+        )
+        await self._story_context_generator.generate(
+            scene.id, previous_context=story_context
         )
 
         logger.info(

@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, ForeignKey, Integer, String
+from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.outbound.database.models.base_model import BaseModel
@@ -94,6 +94,7 @@ class SceneModel(BaseModel):
     is_final_for_novel: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False
     )
+    story_context: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     roadmap: Mapped["RoadmapModel"] = relationship(
         "RoadmapModel", back_populates="scenes"

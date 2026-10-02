@@ -73,6 +73,9 @@ class SceneService:
         scenes = await self._repository.list_by_roadmap_id(roadmap_id)
         return scenes
 
+    async def update_story_context(self, scene_id: int, story_context: str) -> None:
+        await self._repository.update_story_context(scene_id, story_context)
+
     async def delete(self, scene_id: int) -> None:
         await self._repository.delete(scene_id)
 
@@ -113,6 +116,9 @@ class DialogueLineService:
     async def list_by_novel(self, novel_id: int) -> list[DialogueLine] | None:
         dialog_line = await self._repository.list_by_novel_id(novel_id)
         return dialog_line
+
+    async def list_by_scene(self, scene_id: int) -> list[DialogueLine]:
+        return await self._repository.list_by_scene_id(scene_id)
 
     async def delete(self, dialog_line_id: int) -> None:
         await self._repository.delete(dialog_line_id)

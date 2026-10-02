@@ -15,6 +15,7 @@ from src.core.novels.services.generate.dialogue import DialogueGenerator
 from src.core.novels.services.generate.novel import NovelGenerator
 from src.core.novels.services.generate.roadmap import RoadmapGenerator
 from src.core.novels.services.generate.scene import SceneGenerator
+from src.core.novels.services.generate.story_context import StoryContextGenerator
 from src.outbound.ai.client import build_deepseek_client
 from src.outbound.ai.codex_agent import CodexResearcher
 from src.outbound.ai.deepseek_client import DeepSeekGenerator
@@ -74,6 +75,14 @@ def build_novel_composition_service(session: AsyncSession) -> NovelCompositionSe
         dialogue_line_service=dialogue_line_service,
         generator=generator,
     )
+    story_context_generator = StoryContextGenerator(
+        novel_service=novel_service,
+        roadmap_service=roadmap_service,
+        scene_service=scene_service,
+        character_service=character_service,
+        dialogue_line_service=dialogue_line_service,
+        generator=generator,
+    )
 
     return NovelCompositionService(
         novel_generator=novel_generator,
@@ -81,6 +90,7 @@ def build_novel_composition_service(session: AsyncSession) -> NovelCompositionSe
         roadmap_generator=roadmap_generator,
         scene_generator=scene_generator,
         dialogue_generator=dialogue_generator,
+        story_context_generator=story_context_generator,
         codex_researcher=build_codex_researcher(),
     )
 
@@ -115,6 +125,14 @@ def build_scene_continuation_service(session: AsyncSession) -> SceneContinuation
         dialogue_line_service=dialogue_line_service,
         generator=generator,
     )
+    story_context_generator = StoryContextGenerator(
+        novel_service=novel_service,
+        roadmap_service=roadmap_service,
+        scene_service=scene_service,
+        character_service=character_service,
+        dialogue_line_service=dialogue_line_service,
+        generator=generator,
+    )
 
     return SceneContinuationService(
         novel_repository=novel_repository,
@@ -123,6 +141,7 @@ def build_scene_continuation_service(session: AsyncSession) -> SceneContinuation
         dialogue_line_repository=dialogue_line_repository,
         scene_generator=scene_generator,
         dialogue_generator=dialogue_generator,
+        story_context_generator=story_context_generator,
         lock=SceneGenerationLock(session),
     )
 
