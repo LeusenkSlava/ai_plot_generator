@@ -13,6 +13,17 @@ dependencies = [
     "psycopg[binary]>=3.3.4",
     "pydantic-ai>=2.38.0",
     "pydantic-settings>=2.15.0",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "respx>=0.23.1",
     "sqlalchemy[mypy]>=2.0.52",
     "uvicorn>=0.52.4",
 ]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = []

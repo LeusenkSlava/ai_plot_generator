@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.codex.services import CodexService
@@ -10,17 +12,25 @@ from src.core.novels.services.crud import (
     RoadmapService,
     SceneService,
 )
-from src.core.novels.services.generate.character import CharacterGenerator
-from src.core.novels.services.generate.dialogue import DialogueGenerator
-from src.core.novels.services.generate.novel import NovelGenerator
-from src.core.novels.services.generate.roadmap import RoadmapGenerator
-from src.core.novels.services.generate.scene import SceneGenerator
-from src.core.novels.services.generate.story_context import StoryContextGenerator
+from src.core.novels.services.generate import (
+    CharacterGenerator,
+    DialogueGenerator,
+    NovelGenerator,
+    RoadmapGenerator,
+    SceneGenerator,
+    StoryContextGenerator,
+)
+from src.core.novels.use_cases import (
+    GenerateNovelUseCase,
+    GenerateSceneUseCase,
+)
 from src.outbound.ai.client import build_deepseek_client
-from src.outbound.ai.codex_agent import CodexResearcher
 from src.outbound.ai.deepseek_client import DeepSeekGenerator
 from src.outbound.codex.client import build_codex_client
 from src.outbound.codex.codex_client import HttpCodexClient
+from src.outbound.database.repositories.generation_job_repository import (
+    GenerationJobRepository,
+)
 from src.outbound.database.repositories.novel_repository import (
     CharacterRepository,
     DialogueLineRepository,
@@ -33,119 +43,154 @@ from src.outbound.database.repositories.scene_generation_lock import (
 )
 
 
-def build_novel_composition_service(session: AsyncSession) -> NovelCompositionService:
-    novel_repository = NovelRepository(session)
-    character_repository = CharacterRepository(session)
-    roadmap_repository = RoadmapRepository(session)
-    scene_repository = SceneRepository(session)
-    dialogue_line_repository = DialogueLineRepository(session)
+@dataclass(frozen=True, slots=True)
+class NovelRepositories:
+    novel: NovelRepository
+    character: CharacterRepository
+    roadmap: RoadmapRepository
+    scene: SceneRepository
+    dialogue_line: DialogueLineRepository
 
-    novel_service = NovelService(novel_repository)
-    character_service = CharacterService(character_repository)
-    roadmap_service = RoadmapService(roadmap_repository)
-    scene_service = SceneService(scene_repository)
-    dialogue_line_service = DialogueLineService(dialogue_line_repository)
 
+def build_novel_repositories(session: AsyncSession) -> NovelRepositories:
+    return NovelRepositories(
+        novel=NovelRepository(session),
+        character=CharacterRepository(session),
+        roadmap=RoadmapRepository(session),
+        scene=SceneRepository(session),
+        dialogue_line=DialogueLineRepository(session),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class NovelDomainServices:
+    novel: NovelService
+    character: CharacterService
+    roadmap: RoadmapService
+    scene: SceneService
+    dialogue_line: DialogueLineService
+
+
+def build_novel_domain_services(
+    repos: NovelRepositories,
+) -> NovelDomainServices:
+    return NovelDomainServices(
+        novel=NovelService(repos.novel),
+        character=CharacterService(repos.character),
+        roadmap=RoadmapService(repos.roadmap),
+        scene=SceneService(repos.scene),
+        dialogue_line=DialogueLineService(repos.dialogue_line),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class NovelGenerators:
+    novel: NovelGenerator
+    character: CharacterGenerator
+    roadmap: RoadmapGenerator
+    scene: SceneGenerator
+    dialogue: DialogueGenerator
+    story_context: StoryContextGenerator
+
+
+def build_novel_generators(
+    services: NovelDomainServices,
+) -> NovelGenerators:
     generator = DeepSeekGenerator(client=build_deepseek_client())
     codex_service = CodexService(HttpCodexClient(build_codex_client()))
-    novel_generator = NovelGenerator(generator=generator, novel_service=novel_service)
-    character_generator = CharacterGenerator(
-        novel_service=novel_service,
-        character_service=character_service,
-        codex_service=codex_service,
-        generator=generator,
+
+    return NovelGenerators(
+        novel=NovelGenerator(
+            novel_service=services.novel,
+            codex_service=codex_service,
+            generator=generator,
+        ),
+        character=CharacterGenerator(
+            novel_service=services.novel,
+            character_service=services.character,
+            codex_service=codex_service,
+            generator=generator,
+        ),
+        roadmap=RoadmapGenerator(
+            novel_service=services.novel,
+            roadmap_service=services.roadmap,
+            generator=generator,
+        ),
+        scene=SceneGenerator(
+            novel_service=services.novel,
+            roadmap_service=services.roadmap,
+            scene_service=services.scene,
+            generator=generator,
+        ),
+        dialogue=DialogueGenerator(
+            novel_service=services.novel,
+            codex_service=codex_service,
+            scene_service=services.scene,
+            roadmap_service=services.roadmap,
+            character_service=services.character,
+            dialogue_line_service=services.dialogue_line,
+            generator=generator,
+        ),
+        story_context=StoryContextGenerator(
+            novel_service=services.novel,
+            roadmap_service=services.roadmap,
+            scene_service=services.scene,
+            character_service=services.character,
+            dialogue_line_service=services.dialogue_line,
+            generator=generator,
+        ),
     )
-    roadmap_generator = RoadmapGenerator(
-        novel_service=novel_service,
-        roadmap_service=roadmap_service,
-        generator=generator,
-    )
-    scene_generator = SceneGenerator(
-        novel_service=novel_service,
-        roadmap_service=roadmap_service,
-        scene_service=scene_service,
-        generator=generator,
-    )
-    dialogue_generator = DialogueGenerator(
-        novel_service=novel_service,
-        codex_service=codex_service,
-        scene_service=scene_service,
-        roadmap_service=roadmap_service,
-        character_service=character_service,
-        dialogue_line_service=dialogue_line_service,
-        generator=generator,
-    )
-    story_context_generator = StoryContextGenerator(
-        novel_service=novel_service,
-        roadmap_service=roadmap_service,
-        scene_service=scene_service,
-        character_service=character_service,
-        dialogue_line_service=dialogue_line_service,
-        generator=generator,
-    )
+
+
+def build_novel_composition_service(
+    session: AsyncSession,
+) -> NovelCompositionService:
+    repos = build_novel_repositories(session)
+    services = build_novel_domain_services(repos)
+    generators = build_novel_generators(services)
 
     return NovelCompositionService(
-        novel_generator=novel_generator,
-        character_generator=character_generator,
-        roadmap_generator=roadmap_generator,
-        scene_generator=scene_generator,
-        dialogue_generator=dialogue_generator,
-        story_context_generator=story_context_generator,
-        codex_researcher=build_codex_researcher(),
+        novel_generator=generators.novel,
+        character_generator=generators.character,
+        roadmap_generator=generators.roadmap,
+        scene_generator=generators.scene,
+        dialogue_generator=generators.dialogue,
+        story_context_generator=generators.story_context,
     )
 
 
-def build_scene_continuation_service(session: AsyncSession) -> SceneContinuationService:
-    novel_repository = NovelRepository(session)
-    character_repository = CharacterRepository(session)
-    roadmap_repository = RoadmapRepository(session)
-    scene_repository = SceneRepository(session)
-    dialogue_line_repository = DialogueLineRepository(session)
-
-    novel_service = NovelService(novel_repository)
-    character_service = CharacterService(character_repository)
-    roadmap_service = RoadmapService(roadmap_repository)
-    scene_service = SceneService(scene_repository)
-    dialogue_line_service = DialogueLineService(dialogue_line_repository)
-
-    generator = DeepSeekGenerator(client=build_deepseek_client())
-    codex_service = CodexService(HttpCodexClient(build_codex_client()))
-    scene_generator = SceneGenerator(
-        novel_service=novel_service,
-        roadmap_service=roadmap_service,
-        scene_service=scene_service,
-        generator=generator,
-    )
-    dialogue_generator = DialogueGenerator(
-        novel_service=novel_service,
-        codex_service=codex_service,
-        scene_service=scene_service,
-        roadmap_service=roadmap_service,
-        character_service=character_service,
-        dialogue_line_service=dialogue_line_service,
-        generator=generator,
-    )
-    story_context_generator = StoryContextGenerator(
-        novel_service=novel_service,
-        roadmap_service=roadmap_service,
-        scene_service=scene_service,
-        character_service=character_service,
-        dialogue_line_service=dialogue_line_service,
-        generator=generator,
-    )
+def build_scene_continuation_service(
+    session: AsyncSession,
+) -> SceneContinuationService:
+    repos = build_novel_repositories(session)
+    services = build_novel_domain_services(repos)
+    generators = build_novel_generators(services)
 
     return SceneContinuationService(
-        novel_repository=novel_repository,
-        roadmap_repository=roadmap_repository,
-        scene_repository=scene_repository,
-        dialogue_line_repository=dialogue_line_repository,
-        scene_generator=scene_generator,
-        dialogue_generator=dialogue_generator,
-        story_context_generator=story_context_generator,
+        novel_repository=repos.novel,
+        roadmap_repository=repos.roadmap,
+        scene_repository=repos.scene,
+        dialogue_line_repository=repos.dialogue_line,
+        scene_generator=generators.scene,
+        dialogue_generator=generators.dialogue,
+        story_context_generator=generators.story_context,
         lock=SceneGenerationLock(session),
     )
 
 
-def build_codex_researcher() -> CodexResearcher:
-    codex_service = CodexService(HttpCodexClient(build_codex_client()))
-    return CodexResearcher(build_deepseek_client(), codex_service)
+def build_generate_novel_use_case(
+    session: AsyncSession,
+) -> GenerateNovelUseCase:
+    return GenerateNovelUseCase(
+        jobs_repo=GenerationJobRepository(session),
+        composition_service=build_novel_composition_service(session),
+    )
+
+
+def build_generate_scene_use_case(
+    session: AsyncSession,
+) -> GenerateSceneUseCase:
+    return GenerateSceneUseCase(
+        jobs_repo=GenerationJobRepository(session),
+        continuation_service=build_scene_continuation_service(session),
+    )

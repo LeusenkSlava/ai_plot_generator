@@ -1,4 +1,3 @@
-import json
 import logging
 
 from aiokafka import AIOKafkaProducer
@@ -17,7 +16,7 @@ class GenerationResultSender:
         self._producer = producer
 
     async def send_job(self, job: GenerationJobModel) -> None:
-        await self.send(
+        await self._send(
             GenerationResult(
                 job_id=job.job_id,
                 status=job.status,
@@ -27,9 +26,9 @@ class GenerationResultSender:
         )
 
     async def send_failed(self, job_id: int, error: str) -> None:
-        await self.send(GenerationResult(job_id=job_id, status="failed", error=error))
+        await self._send(GenerationResult(job_id=job_id, status="failed", error=error))
 
-    async def send(self, result: GenerationResult) -> None:
+    async def _send(self, result: GenerationResult) -> None:
         await self._producer.send_and_wait(
             Topics.GENERATION_RESULTS,
             result.model_dump_json(exclude_none=True).encode(),
@@ -42,11 +41,3 @@ class GenerationResultSender:
             result.result_id,
             result.error,
         )
-
-
-def extract_job_id(raw: bytes) -> int | None:
-    """job_id из невалидного сообщения — чтобы всё равно ответить failed."""
-    try:
-        return int(json.loads(raw).get("job_id"))
-    except ValueError, TypeError, AttributeError:
-        return None

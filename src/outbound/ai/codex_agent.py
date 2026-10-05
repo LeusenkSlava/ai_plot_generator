@@ -1,13 +1,26 @@
+import json
 import logging
+import time
 from dataclasses import asdict, dataclass
 
 from openai import AsyncOpenAI
 from pydantic_ai import Agent, RunContext
+from pydantic_ai.messages import (
+    ModelMessage,
+    ModelRequest,
+    TextPart,
+    ThinkingPart,
+    ToolCallPart,
+    ToolReturnPart,
+    UserPromptPart,
+)
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.deepseek import DeepSeekProvider
 
 from src.core.codex.exceptions import CodexUnavailableError
 from src.core.codex.services import CodexService
+from src.core.novels.llm_trace import llm_step
+from src.outbound.ai.llm_log import log_llm_call
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +83,34 @@ def _build_agent(client: AsyncOpenAI, model_name: str) -> Agent[CodexDeps, str]:
     return agent
 
 
+def _readable_messages(messages: list[ModelMessage]) -> list[dict]:
+    """Переписка агента в виде role/content, как у обычных запросов."""
+    out: list[dict] = []
+    instructions_logged = False
+    for message in messages:
+        if isinstance(message, ModelRequest):
+            if message.instructions and not instructions_logged:
+                out.append({"role": "system", "content": message.instructions})
+                instructions_logged = True
+            for part in message.parts:
+                if isinstance(part, UserPromptPart):
+                    out.append({"role": "user", "content": str(part.content)})
+                elif isinstance(part, ToolReturnPart):
+                    content = json.dumps(part.content, ensure_ascii=False, indent=2, default=str)
+                    out.append({"role": f"tool:{part.tool_name}", "content": content})
+                else:
+                    out.append({"role": part.part_kind, "content": str(getattr(part, "content", part))})
+        else:
+            for part in message.parts:
+                if isinstance(part, ToolCallPart):
+                    out.append({"role": "assistant:call", "content": f"{part.tool_name}({part.args_as_json_str()})"})
+                elif isinstance(part, ThinkingPart):
+                    out.append({"role": "assistant:thinking", "content": part.content})
+                elif isinstance(part, TextPart):
+                    out.append({"role": "assistant", "content": part.content})
+    return out
+
+
 class CodexResearcher:
     """Реализует CodexResearcherProtocol: pydantic-ai агент, который сам ходит в Codex."""
 
@@ -79,16 +120,41 @@ class CodexResearcher:
         codex_service: CodexService,
         model_name: str = "deepseek-v4-flash",
     ):
+        self._model_name = model_name
         self._agent = _build_agent(client, model_name)
         self._deps = CodexDeps(codex=codex_service)
 
     async def research(self, user_prompt: str, universe_id: int) -> str:
         prompt = f"universe_id: {universe_id}\nПожелание пользователя: {user_prompt}"
+        started = time.monotonic()
         try:
             result = await self._agent.run(prompt, deps=self._deps)
-        except CodexUnavailableError:
-            raise
         except Exception as e:
+            with llm_step("CodexResearcher"):
+                log_llm_call(
+                    model=self._model_name,
+                    messages=[{"role": "user", "content": prompt}],
+                    response=None,
+                    prompt_tokens=None,
+                    completion_tokens=None,
+                    duration_s=time.monotonic() - started,
+                    error=str(e),
+                )
+            if isinstance(e, CodexUnavailableError):
+                raise
             logger.error(f"CodexResearcher.research: {e}")
             raise RuntimeError(f"Codex research failed: {e}") from e
+
+        usage = result.usage
+        with llm_step("CodexResearcher"):
+            log_llm_call(
+                model=self._model_name,
+                # Вся переписка агента: инструкции, вызовы инструментов и их результаты
+                messages=_readable_messages(result.all_messages()),
+                response=result.output,
+                prompt_tokens=usage.input_tokens,
+                completion_tokens=usage.output_tokens,
+                duration_s=time.monotonic() - started,
+                extra={"llm_requests": usage.requests, "tool_calls": usage.tool_calls},
+            )
         return result.output

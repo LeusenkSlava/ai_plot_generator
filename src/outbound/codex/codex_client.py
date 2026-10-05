@@ -37,32 +37,54 @@ class HttpCodexClient:
     def __init__(self, client: httpx.AsyncClient):
         self._client = client
 
-    async def _get[T](self, url: str, schema: type[T]) -> list[T]:
+    async def _request(self, url: str) -> Any:
         try:
             response = await self._client.get(url)
             response.raise_for_status()
-            return TypeAdapter(list[schema]).validate_python(response.json())
-        except (httpx.HTTPError, ValidationError, ValueError) as e:
+            return response.json()
+        except (httpx.HTTPError, ValueError) as e:
+            logger.error(f"HttpCodexClient GET {url}: {e}")
+            raise CodexUnavailableError(f"Codex request failed: {url}: {e}") from e
+
+    async def _get_one[T](self, url: str, schema: type[T]) -> T:
+        data = await self._request(url)
+        try:
+            return schema.model_validate(data)
+        except ValidationError as e:
+            logger.error(f"HttpCodexClient GET {url}: {e}")
+            raise CodexUnavailableError(f"Codex request failed: {url}: {e}") from e
+
+    async def _get[T](self, url: str, schema: type[T]) -> list[T]:
+        data = await self._request(url)
+        try:
+            return TypeAdapter(list[schema]).validate_python(data)
+        except ValidationError as e:
             logger.error(f"HttpCodexClient GET {url}: {e}")
             raise CodexUnavailableError(f"Codex request failed: {url}: {e}") from e
 
     @staticmethod
     def _to_domain(item: Any, model: type) -> Any:
-        data = item.model_dump(exclude={"tags"}) if hasattr(item, "tags") else item.model_dump()
+        data = (
+            item.model_dump(exclude={"tags"})
+            if hasattr(item, "tags")
+            else item.model_dump()
+        )
         if hasattr(item, "tags"):
             data["tags"] = _tags(item.tags)
         return model(**data)
 
-    async def get_universes(self) -> list[Universe]:
-        items = await self._get("/universes", UniverseSchema)
-        return [self._to_domain(i, Universe) for i in items]
+    async def get_universe(self, universe_id: int) -> Universe:
+        item = await self._get_one(f"/universes/{universe_id}", UniverseSchema)
+        return self._to_domain(item, Universe)
 
     async def get_characters(self, universe_id: int) -> list[CodexCharacter]:
         items = await self._get(f"/universes/{universe_id}/characters", CharacterSchema)
         return [self._to_domain(i, CodexCharacter) for i in items]
 
     async def get_backgrounds(self, universe_id: int) -> list[Background]:
-        items = await self._get(f"/universes/{universe_id}/backgrounds", BackgroundSchema)
+        items = await self._get(
+            f"/universes/{universe_id}/backgrounds", BackgroundSchema
+        )
         return [self._to_domain(i, Background) for i in items]
 
     async def get_sprites(self, character_id: int) -> list[Sprite]:

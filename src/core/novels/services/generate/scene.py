@@ -1,7 +1,7 @@
 import logging
 
 from src.core.novels.exceptions import GenerationError
-from src.core.novels.interfaces import GeneratorProtocol
+from src.core.novels.interfaces.generation import GeneratorProtocol
 from src.core.novels.models import Novel, Roadmap, Scene
 from src.core.novels.services.crud import NovelService, RoadmapService, SceneService
 from src.core.novels.services.generate.base import BaseGenerator
@@ -42,7 +42,9 @@ class SceneGenerator(BaseGenerator):
         order = len(existing) + 1
         is_final_for_roadmap = order >= max(roadmap.scenes_count, 1)
         roadmaps = await self._roadmap_service.list_by_novel(novel.id) or []
-        is_last_roadmap = roadmap.step_id >= max((r.step_id for r in roadmaps), default=0)
+        is_last_roadmap = roadmap.step_id >= max(
+            (r.step_id for r in roadmaps), default=0
+        )
 
         prompt = self.__create_prompt(
             novel, roadmap, order, previous_scenes or [], story_context
@@ -82,8 +84,9 @@ class SceneGenerator(BaseGenerator):
                 "Сцена должна раскрывать цель шага и задавать место и ситуацию действия, "
                 "но не пересказывать сами диалоги. Укажи:\n"
                 "1. title - короткое название сцены.\n"
-                "2. description - описание места, ситуации и настроения сцены, "
-                "на основе которого дальше будут сгенерированы диалоги персонажей.\n"
+                "2. description - описание места, времени, ситуации и конфликта сцены, "
+                "на основе которого дальше будут сгенерированы диалоги персонажей: "
+                "2-4 предложения, не больше 400 символов, без атмосферных подробностей.\n"
                 "Отвечай СТРОГО в формате JSON, соответствующего этой схеме:\n"
                 """
                 {
@@ -93,24 +96,25 @@ class SceneGenerator(BaseGenerator):
                 """
             ),
         }
-        user_prompt = {
-            "role": "user",
-            "content": (
-                f"Название истории: {novel.title}\n"
-                f"Тон повествования: {novel.tone}\n"
-                f"Шаг роадмапа: {roadmap.title}\n"
-                f"Цель шага: {roadmap.goal}\n"
-                f"Номер сцены в шаге: {order} из {scenes_count}"
-            ),
-        }
-        if previous_scenes:
-            story_so_far = "\n".join(
-                f"- {scene.title}: {scene.description}" for scene in previous_scenes
-            )
-            user_prompt["content"] += f"\n\nПредыдущие сцены:\n{story_so_far}"
+        # Сначала неизменное для новеллы, потом меняющееся: так работает кеш префикса у провайдера
+        user_content = (
+            f"Название истории: {novel.title}\n" f"Тон повествования: {novel.tone}"
+        )
         if story_context:
-            user_prompt["content"] += (
+            user_content += (
                 "\n\nИзложение истории на данный момент (сцена не должна ему противоречить; "
                 f"одежду персонажей не меняй без сюжетной причины):\n{story_context}"
             )
+        if previous_scenes:
+            # Что произошло, уже есть в изложении — полностью нужна только последняя сцена для стыка
+            *earlier, last = previous_scenes
+            story_so_far = "".join(f"- {scene.title}\n" for scene in earlier)
+            story_so_far += f"- {last.title}: {last.description}"
+            user_content += f"\n\nПредыдущие сцены:\n{story_so_far}"
+        user_content += (
+            f"\n\nШаг роадмапа: {roadmap.title}\n"
+            f"Цель шага: {roadmap.goal}\n"
+            f"Номер сцены в шаге: {order} из {scenes_count}"
+        )
+        user_prompt = {"role": "user", "content": user_content}
         return [system_prompt, user_prompt]

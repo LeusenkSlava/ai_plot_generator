@@ -13,8 +13,8 @@ class CodexService:
     def __init__(self, client: CodexClientProtocol):
         self._client = client
 
-    async def get_universes(self) -> list[Universe]:
-        return await self._client.get_universes()
+    async def get_universe(self, universe_id: int) -> Universe:
+        return await self._client.get_universe(universe_id=universe_id)
 
     async def get_characters(self, universe_id: int) -> list[CodexCharacter]:
         return await self._client.get_characters(universe_id)

@@ -9,11 +9,11 @@ from .novels import (
 )
 
 __all__ = (
-    "GenerationJobModel",
-    "RoadmapModel",
-    "DialogueActionModel",
     "CharacterModel",
+    "DialogueActionModel",
     "DialogueLineModel",
+    "GenerationJobModel",
     "NovelModel",
+    "RoadmapModel",
     "SceneModel",
 )

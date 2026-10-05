@@ -2,9 +2,8 @@ import logging
 
 from src.core.codex.models import CodexCharacter
 from src.core.codex.services import CodexService
-
 from src.core.novels.exceptions import GenerationError
-from src.core.novels.interfaces import GeneratorProtocol
+from src.core.novels.interfaces.generation import GeneratorProtocol
 from src.core.novels.models import Character, Novel
 from src.core.novels.services.crud import CharacterService, NovelService
 from src.core.novels.services.generate.base import BaseGenerator
@@ -34,7 +33,9 @@ class CharacterGenerator(BaseGenerator):
         codex_characters: list[CodexCharacter] = []
         if novel.universe_id is not None:
             try:
-                codex_characters = await self._codex_service.get_characters(novel.universe_id)
+                codex_characters = await self._codex_service.get_characters(
+                    novel.universe_id
+                )
             except Exception as e:
                 raise GenerationError(f"Codex characters request failed: {e}") from e
         codex_by_slug = {c.slug: c for c in codex_characters}
@@ -50,7 +51,9 @@ class CharacterGenerator(BaseGenerator):
         for item in characters_data:
             codex_character = codex_by_slug.get(item.get("codex_slug") or "")
             if codex_by_slug and item.get("codex_slug") and not codex_character:
-                logger.warning(f"Generator referenced unknown codex character '{item['codex_slug']}'")
+                logger.warning(
+                    f"Generator referenced unknown codex character '{item['codex_slug']}'"
+                )
             character = Character(
                 id=None,
                 created_at=None,

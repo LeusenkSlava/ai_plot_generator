@@ -1,5 +1,9 @@
+import json
 from dataclasses import dataclass
 from datetime import datetime
+from typing import ClassVar
+
+from src.core._shared.models.llm_base import LLMGeneratedModel
 
 
 @dataclass
@@ -15,6 +19,7 @@ class Character:
     # id персонажа в Codex; только для новелл с universe_id
     codex_character_id: int | None = None
 
+
 @dataclass
 class Roadmap:
     id: int | None
@@ -27,6 +32,7 @@ class Roadmap:
     target_choice: bool
     choice_stakes: str | None
     scenes_count: int
+
 
 @dataclass
 class Scene:
@@ -45,8 +51,9 @@ class Scene:
     # Передаётся в генерацию следующей сцены и пересобирается после неё
     story_context: str | None = None
 
+
 @dataclass
-class Novel:
+class Novel(LLMGeneratedModel):
     id: int | None
     created_at: datetime | None
     updated_at: datetime | None
@@ -55,8 +62,25 @@ class Novel:
     public_description: str
     description: str
     tone: str
-    # id вселенной в Codex; None — вселенная не задана, в Codex не обращаемся
     universe_id: int | None = None
+
+    _LLM_FIELDS: ClassVar[dict[str, str]] = {
+        "title": "короткое, цепляющее название",
+        "public_description": "описание для пользователя, БЕЗ спойлеров",
+        "description": "главное описание истории, по нему будет генерироваться сюжет",
+        "tone": "тон и стиль повествования",
+    }
+
+    @classmethod
+    def from_llm(cls, data: dict, *, universe_id: int | None = None) -> "Novel":
+        return cls(
+            id=None,
+            created_at=None,
+            updated_at=None,
+            universe_id=universe_id,
+            **cls.llm_values(data),
+        )
+
 
 @dataclass
 class DialogueLine:
@@ -78,6 +102,7 @@ class DialogueLine:
     sprite_asset_key: str | None = None
     outfit_asset_key: str | None = None
     emotion_asset_key: str | None = None
+
 
 @dataclass
 class DialogueAction:

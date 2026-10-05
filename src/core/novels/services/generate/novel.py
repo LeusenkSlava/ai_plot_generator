@@ -1,6 +1,8 @@
 import logging
 
-from src.core.novels.interfaces import GeneratorProtocol
+from src.core.codex.services import CodexService
+from src.core.novels.exceptions import GenerationError
+from src.core.novels.interfaces.generation import GeneratorProtocol
 from src.core.novels.models import Novel
 from src.core.novels.services.crud import NovelService
 from src.core.novels.services.generate.base import BaseGenerator
@@ -9,62 +11,70 @@ logger = logging.getLogger(__name__)
 
 
 class NovelGenerator(BaseGenerator):
-    def __init__(self, novel_service: NovelService, generator: GeneratorProtocol):
+    def __init__(
+        self,
+        novel_service: NovelService,
+        codex_service: CodexService,
+        generator: GeneratorProtocol,
+    ):
         super().__init__(generator)
         self._novel_service = novel_service
+        self._codex_service = codex_service
 
-    async def generate(
-        self,
-        user_prompt: str,
-        universe_id: int | None = None,
-        codex_context: str | None = None,
-    ) -> Novel:
+    async def generate(self, user_prompt: str, universe_id: int | None = None) -> Novel:
+        codex_context = None
+        if universe_id:
+            codex_context = await self.__codex_context(universe_id)
+
         prompt = self.__create_prompt(user_prompt, codex_context)
         data = await self._generate(prompt)
 
-        novel = Novel(
-            id=None,
-            title=data["title"],
-            public_description=data["public_description"],
-            description=data["description"],
-            tone=data["tone"],
-            universe_id=universe_id,
-            created_at=None,
-            updated_at=None,
-        )
+        novel = Novel.from_llm(data, universe_id=universe_id)
         novel = await self._novel_service.add(novel)
         return novel
+
+    async def __codex_context(self, universe_id: int) -> str:
+        """Вселенная, персонажи и фоны из Codex"""
+        try:
+            universe = await self._codex_service.get_universe(universe_id)
+            characters = await self._codex_service.get_characters(universe_id)
+            backgrounds = await self._codex_service.get_backgrounds(universe_id)
+        except Exception as e:
+            raise GenerationError(f"Codex request failed: {e}") from e
+
+        if universe is None:
+            raise GenerationError(f"Universe with id {universe_id} not found in Codex")
+
+        parts = [f"Вселенная: {universe.title}\n{universe.description}"]
+        if characters:
+            parts.append(
+                "Персонажи (других нет):\n"
+                + "\n".join(f"- {c.name}: {c.description}" for c in characters)
+            )
+        if backgrounds:
+            parts.append(
+                "Локации (других нет):\n"
+                + "\n".join(f"- {b.description}" for b in backgrounds)
+            )
+        return "\n\n".join(parts)
 
     def __create_prompt(
         self, user_prompt: str, codex_context: str | None = None
     ) -> list[dict]:
-        """Создает промт для создания новеллы на основе пользовательского промта"""
-        system_prompt = {
-            "role": "system",
-            "content": (
-                "Ты сценарист интерактивных визуальных новелл."
-                "По тегам и описанию от пользователя создай творческую основу истории для дальнейшей генерации."
-                "Создай:"
-                "1. title - короткое, цепляющее название."
-                "2. public_description - Описание для пользователя, БЕЗ спойлеров."
-                "3. description - Галвное описание истории по нему будет генерировться сюжет."
-                "5. tone - Тон и стиль повествования."
-                "Отвечай СТРОГО в формате JSON, соответствующего этой схеме"
-                """
-                {
-                  "title": string,
-                  "public_description": string,
-                  "description": string,
-                  "tone": string,
-                }
-                """
-            ),
-        }
+        """Создает промт для создания новеллы на основе пользовательского промта."""
+        system_content = (
+            "Ты сценарист интерактивных визуальных новелл. "
+            "По тегам и описанию от пользователя создай творческую основу истории "
+            "для дальнейшей генерации. " + Novel.llm_json_instruction()
+        )
         if codex_context:
-            system_prompt["content"] += (
+            system_content += (
                 "\nИстория происходит в существующей вселенной из базы знаний. "
                 "Используй ТОЛЬКО этих персонажей и локации, ничего не выдумывай:\n"
                 + codex_context
             )
-        user_prompt = {"role": "user", "content": user_prompt}
-        return [system_prompt, user_prompt]
+
+        return [
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": user_prompt},
+        ]

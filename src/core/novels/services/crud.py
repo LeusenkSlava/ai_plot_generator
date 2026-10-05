@@ -1,6 +1,6 @@
-from src.core.novels.interfaces import (
+from src.core.novels.interfaces.repository import (
     CharacterRepositoryProtocol,
-    DialogueActionProtocol,
+    DialogueActionRepositoryProtocol,
     DialogueLineRepositoryProtocol,
     NovelRepositoryProtocol,
     RoadmapRepositoryProtocol,
@@ -125,7 +125,7 @@ class DialogueLineService:
 
 
 class DialogueActionService:
-    def __init__(self, repository: DialogueActionProtocol):
+    def __init__(self, repository: DialogueActionRepositoryProtocol):
         self._repository = repository
 
     async def add(self, dialog_action: DialogueAction) -> DialogueAction:

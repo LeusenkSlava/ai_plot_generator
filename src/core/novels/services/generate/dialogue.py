@@ -4,11 +4,10 @@ from dataclasses import dataclass, field
 from src.core.codex.models import Background, Emotion, Outfit, Sprite
 from src.core.codex.services import CodexService
 from src.core.novels.exceptions import GenerationError
-from src.core.novels.interfaces import GeneratorProtocol
+from src.core.novels.interfaces.generation import GeneratorProtocol
 from src.core.novels.models import (
     Character,
     DialogueLine,
-    Roadmap,
     Scene,
 )
 from src.core.novels.services.crud import (
@@ -21,6 +20,15 @@ from src.core.novels.services.crud import (
 from src.core.novels.services.generate.base import BaseGenerator
 
 logger = logging.getLogger(__name__)
+
+# Реплики прошлой сцены нужны только для стыка — длинные авторские вставки обрезаем
+PREVIOUS_LINE_MAX_CHARS = 300
+SPRITE_DESCRIPTION_MAX_CHARS = 100
+
+
+def _short(text: str, limit: int = SPRITE_DESCRIPTION_MAX_CHARS) -> str:
+    text = " ".join(text.split())
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
 
 
 @dataclass
@@ -101,7 +109,6 @@ class DialogueGenerator(BaseGenerator):
 
         prompt = self.__create_prompt(
             scene,
-            roadmap,
             characters,
             assets,
             previous_lines or [],
@@ -234,21 +241,20 @@ class DialogueGenerator(BaseGenerator):
             sprites = assets.sprites.get(character.id)
             if not sprites:
                 continue
-            lines.append(f"Спрайты персонажа {character.name}:")
+            lines.append(f"Спрайты (sprite_slug) персонажа {character.name}:")
             for slug, sa in sprites.items():
-                lines.append(f"- sprite_slug {slug}: {sa.sprite.description}")
+                lines.append(f"- {slug}: {_short(sa.sprite.description)}")
                 lines.append(
-                    f"  outfit_slug: {', '.join(f'{o.slug} ({o.name})' for o in sa.outfits.values()) or '-'}"
+                    f"  наряды: {', '.join(f'{o.slug}={o.name}' for o in sa.outfits.values()) or '-'}"
                 )
                 lines.append(
-                    f"  emotion_slug: {', '.join(f'{e.slug} ({e.name})' for e in sa.emotions.values()) or '-'}"
+                    f"  эмоции: {', '.join(f'{e.slug}={e.name}' for e in sa.emotions.values()) or '-'}"
                 )
         return "\n".join(lines)
 
     def __create_prompt(
         self,
         scene: Scene,
-        roadmap: Roadmap,
         characters: list[Character],
         assets: _Assets,
         previous_lines: list[DialogueLine],
@@ -284,45 +290,41 @@ class DialogueGenerator(BaseGenerator):
                 """
             ),
         }
-        user_content = (
-            f"Сцена: {scene.title}\n"
-            f"Описание сцены: {scene.description}\n"
-            f"Цель шага сюжета: {roadmap.goal}\n"
-            f"Персонажи:\n{cast}"
-        )
-        if story_context:
-            user_content += (
-                "\n\nИзложение истории на данный момент (не противоречь ему, "
-                "персонажи одеты так, как в нём указано, пока по сюжету не переоденутся):\n"
-                f"{story_context}"
-            )
-        if previous_lines:
-            names = {character.id: character.name for character in characters}
-            recap = "\n".join(
-                f"{names.get(line.character_id, '?')}: {line.text}"
-                for line in previous_lines
-            )
-            user_content += f"\n\nПоследние реплики предыдущей сцены (продолжи историю, не повторяя их):\n{recap}"
+        # Сначала неизменное для новеллы (персонажи, каталог), потом меняющееся:
+        # так работает кеш префикса у провайдера
+        user_content = f"Персонажи:\n{cast}"
         if assets:
             system_prompt["content"] += (
-                "\nДля визуала каждой реплики выбери ассеты ТОЛЬКО из каталога ниже, "
+                "\nДля визуала каждой реплики выбери ассеты ТОЛЬКО из каталога, "
                 "указывая slug точно как в каталоге, и добавь в объект реплики поля:\n"
                 "- background_slug - фон, подходящий месту и времени сцены (обычно один на всю сцену, "
                 "меняй только если действие переходит в другое место);\n"
                 "- sprite_slug - спрайт говорящего персонажа;\n"
                 "- outfit_slug - наряд из списка выбранного спрайта;\n"
                 "- emotion_slug - эмоция из списка выбранного спрайта, соответствующая тексту реплики.\n"
-                "Если подходящего ассета нет - ставь null."
+                "Если подходящего ассета нет - ставь null.\n"
+                "Наряд персонажа не меняется между репликами и сценами: используй его текущий "
+                "outfit_slug, пока по сюжету персонаж явно не переоделся."
             )
             user_content += (
                 f"\n\nКаталог ассетов:\n{self.__assets_catalog(characters, assets)}"
             )
-            if current_outfits:
-                system_prompt["content"] += (
-                    "\nНаряд персонажа не меняется между репликами и сценами: используй его текущий "
-                    "outfit_slug, пока по сюжету персонаж явно не переоделся."
-                )
-                user_content += f"\n\nТекущие наряды персонажей:\n{current_outfits}"
+        if story_context:
+            user_content += (
+                "\n\nИзложение истории на данный момент (не противоречь ему, "
+                "персонажи одеты так, как в нём указано, пока по сюжету не переоденутся):\n"
+                f"{story_context}"
+            )
+        if current_outfits:
+            user_content += f"\n\nТекущие наряды персонажей:\n{current_outfits}"
+        if previous_lines:
+            names = {character.id: character.name for character in characters}
+            recap = "\n".join(
+                f"{names.get(line.character_id, '?')}: {_short(line.text, PREVIOUS_LINE_MAX_CHARS)}"
+                for line in previous_lines
+            )
+            user_content += f"\n\nПоследние реплики предыдущей сцены (продолжи историю, не повторяя их):\n{recap}"
+        user_content += f"\n\nСцена: {scene.title}\nОписание сцены: {scene.description}"
 
         user_prompt = {"role": "user", "content": user_content}
         return [system_prompt, user_prompt]

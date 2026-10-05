@@ -1,7 +1,7 @@
 import logging
 
 from src.core.novels.exceptions import GenerationError
-from src.core.novels.interfaces import GeneratorProtocol
+from src.core.novels.interfaces.generation import GeneratorProtocol
 from src.core.novels.models import Novel, Roadmap
 from src.core.novels.services.crud import NovelService, RoadmapService
 from src.core.novels.services.generate.base import BaseGenerator
