@@ -58,3 +58,6 @@ migration: docker-env
 		exit 1; \
 	fi
 	$(DOCKER_COMPOSE) exec app alembic revision --autogenerate -m "$(m)"
+
+test:
+	pytest tests/ -v

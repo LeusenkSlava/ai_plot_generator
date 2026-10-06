@@ -21,7 +21,7 @@ from src.core.novels.services.generate.base import BaseGenerator
 
 logger = logging.getLogger(__name__)
 
-# Реплики прошлой сцены нужны только для стыка — длинные авторские вставки обрезаем
+# Реплики прошлой сцены нужны только для стыка - длинные авторские вставки обрезаем
 PREVIOUS_LINE_MAX_CHARS = 300
 SPRITE_DESCRIPTION_MAX_CHARS = 100
 
@@ -75,8 +75,7 @@ class DialogueGenerator(BaseGenerator):
         previous_lines: list[DialogueLine] | None = None,
         story_context: str | None = None,
     ) -> list[DialogueLine]:
-        """Диалог сцены. previous_lines — последние реплики перед сценой, чтобы диалог продолжал их,
-        story_context — изложение истории после предыдущей сцены."""
+        """Генерация диалога"""
         scene = await self._scene_service.get(scene_id)
         if not scene:
             raise GenerationError(f"Scene with id {scene_id} not found")

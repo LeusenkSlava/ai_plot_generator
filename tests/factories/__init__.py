@@ -3,12 +3,21 @@ from tests.factories.codex import (
     character_domain,
     universe_domain,
 )
-from tests.factories.novels import novel_domain, valid_novel_llm_payload
+from tests.factories.novels import (
+    dialogue_line_domain,
+    novel_domain,
+    roadmap_domain,
+    scene_domain,
+    valid_novel_llm_payload,
+)
 
 __all__ = [
     "background_domain",
     "character_domain",
+    "dialogue_line_domain",
     "novel_domain",
+    "roadmap_domain",
+    "scene_domain",
     "universe_domain",
     "valid_novel_llm_payload",
 ]
