@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from dataclasses import asdict, dataclass, field
 
 from src.core.novels.exceptions import GenerationError
@@ -17,6 +18,12 @@ from src.core.novels.services.generate.base import BaseGenerator
 logger = logging.getLogger(__name__)
 
 MAX_KEY_FACTS = 12
+MAX_USED_PHRASES = 10
+
+
+def _normalize(text: str) -> str:
+    """Нормализация текста для сравнения фактов: регистр, пунктуация, лишние пробелы."""
+    return re.sub(r"[^\wа-яё0-9]+", " ", text.lower()).strip()
 
 
 @dataclass
@@ -27,6 +34,8 @@ class StoryState:
     key_facts: list[str] = field(default_factory=list)
     # имя персонажа -> {"outfit": ..., "state": ...}
     characters: dict[str, dict[str, str]] = field(default_factory=dict)
+    # фразы-мотивы, которые уже звучали и не должны повторяться дословно дальше
+    used_phrases: list[str] = field(default_factory=list)
 
     @classmethod
     def load(cls, raw: str | None) -> "StoryState":
@@ -41,6 +50,7 @@ class StoryState:
             summary=data.get("summary") or "",
             key_facts=list(data.get("key_facts") or []),
             characters=dict(data.get("characters") or {}),
+            used_phrases=list(data.get("used_phrases") or []),
         )
 
     def dump(self) -> str:
@@ -54,11 +64,17 @@ class StoryState:
         self.key_facts = [
             f for i, f in enumerate(self.key_facts, 1) if i not in removed
         ]
-        self.key_facts += [
-            f.strip() for f in delta.get("add_facts") or [] if f and f.strip()
-        ]
-        # Страховка от разрастания: самые старые факты уходят первыми
-        self.key_facts = self.key_facts[-MAX_KEY_FACTS:]
+        self.key_facts = self.__merge_facts(
+            self.key_facts, delta.get("add_facts") or []
+        )
+        for phrase in delta.get("used_phrases") or []:
+            phrase = phrase.strip()
+            if not phrase:
+                continue
+            if any(_normalize(phrase) == _normalize(p) for p in self.used_phrases):
+                continue
+            self.used_phrases.append(phrase)
+        self.used_phrases = self.used_phrases[-MAX_USED_PHRASES:]
         for c in delta.get("characters") or []:
             if not c.get("name"):
                 continue
@@ -66,6 +82,36 @@ class StoryState:
             for key in ("outfit", "state"):
                 if value := (c.get(key) or "").strip():
                     current[key] = value
+
+    @staticmethod
+    def __merge_facts(existing: list[str], added: list[str]) -> list[str]:
+        """Склейка фактов без дублей: точный повтор/вложенность отбрасывается,
+        а факт, поглощающий существующий, заменяет его. Самые старые уходят первыми."""
+        result = list(existing)
+        for fact in added:
+            fact = fact.strip()
+            if not fact:
+                continue
+            norm = _normalize(fact)
+            duplicate = False
+            absorbed_index: int | None = None
+            for i, old in enumerate(result):
+                old_norm = _normalize(old)
+                if not old_norm:
+                    continue
+                if norm == old_norm or norm in old_norm:
+                    duplicate = True
+                    break
+                if old_norm in norm:
+                    absorbed_index = i
+                    break
+            if duplicate:
+                continue
+            if absorbed_index is not None:
+                result[absorbed_index] = fact
+            else:
+                result.append(fact)
+        return result[-MAX_KEY_FACTS:]
 
     def render(self, numbered: bool = False) -> str:
         """Текст изложения для промтов."""
@@ -88,6 +134,11 @@ class StoryState:
                     f"состояние — {c.get('state') or 'не указано'}"
                     for name, c in self.characters.items()
                 )
+            )
+        if self.used_phrases:
+            parts.append(
+                "Уже звучавшие фразы (не повторяй их дословно в следующих сценах):\n"
+                + "\n".join(f"- {p}" for p in self.used_phrases)
             )
         return "\n\n".join(parts)
 
@@ -156,23 +207,37 @@ class StoryContextGenerator(BaseGenerator):
         lines: list[DialogueLine],
         state: StoryState,
     ) -> list[dict]:
+        has_codex = novel.universe_id is not None
+        outfit_instruction = (
+            "outfit оставляй пустой — наряд персонажа задаётся каталогом Codex "
+            "через outfit_tag в репликах, не выдумывай его."
+            if has_codex
+            else "outfit - во что одет сейчас (коротко: одежда, цвета); меняй ТОЛЬКО если "
+            "персонаж явно переоделся в этой сцене, иначе оставляй пустую строку. "
+            "Не переписывай уже указанную одежду другими словами."
+        )
         system_prompt = {
             "role": "system",
             "content": (
                 "Ты редактор интерактивной визуальной новеллы и ведёшь изложение истории, "
                 "по которому будут генерироваться следующие сцены. "
                 "По предыдущему изложению и диалогу новой сцены верни ТОЛЬКО изменения:\n"
-                "- summary - новое краткое содержание всей истории с учётом сцены, не больше 5 предложений;\n"
+                "- summary - новое краткое содержание всей истории с учётом сцены, не больше 5 предложений. "
+                "Переписывай компактно, не повторяя дословно предыдущее изложение, и не пересказывай "
+                "одно и то же из сцены в сцену;\n"
                 "- remove_facts - номера фактов из предыдущего изложения, которые устарели, "
                 "больше не важны для сюжета или поглощены новыми;\n"
                 "- add_facts - новые факты из этой сцены, важные для сюжета дальше "
                 "(события, решения, тайны, обещания, отношения, предметы, где находятся персонажи), "
-                "каждый — одно короткое предложение до 120 символов. Не повторяй уже существующие факты. "
+                "каждый — одно короткое предложение до 120 символов. Факт считается дублем, если повторяет "
+                "смысл существующего факта, даже другими словами — не добавляй такие. Если новый факт "
+                "поглощает существующий, добавь номер поглощённого в remove_facts. "
                 f"После изменений фактов должно остаться не больше {MAX_KEY_FACTS};\n"
                 "- characters - только персонажи, у которых что-то изменилось или которые появились впервые: "
-                "outfit - во что одет сейчас (коротко: одежда, цвета; сохраняется, пока персонаж явно не переоделся, "
-                "если ещё не упоминалась — придумай подходящую), "
-                "state - физическое и эмоциональное состояние, до 80 символов. Пустая строка — без изменений.\n"
+                f"{outfit_instruction} "
+                "state - физическое и эмоциональное состояние, до 80 символов. Пустая строка — без изменений;\n"
+                "- used_phrases - до 5 фраз-мотивов (2 и более слов), которые уже звучали в истории "
+                "более одного раза и не должны повторяться дословно в следующих сценах.\n"
                 "Отвечай СТРОГО в формате JSON, соответствующего этой схеме:\n"
                 """
                 {
@@ -185,7 +250,8 @@ class StoryContextGenerator(BaseGenerator):
                       "outfit": string,
                       "state": string
                     }
-                  ]
+                  ],
+                  "used_phrases": [string]
                 }
                 """
             ),

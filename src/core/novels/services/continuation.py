@@ -94,6 +94,7 @@ class SceneContinuationService:
             slot.roadmap.id,
             previous_scenes=state.last_scenes,
             story_context=story_text,
+            order=slot.order,
         )
 
         await self._dialogue_generator.generate(

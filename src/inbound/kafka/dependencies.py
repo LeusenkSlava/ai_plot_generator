@@ -24,6 +24,7 @@ from src.core.novels.use_cases import (
     GenerateNovelUseCase,
     GenerateSceneUseCase,
 )
+from src.main.config.settings import settings
 from src.outbound.ai.client import build_deepseek_client
 from src.outbound.ai.deepseek_client import DeepSeekGenerator
 from src.outbound.codex.client import build_codex_client
@@ -96,7 +97,10 @@ class NovelGenerators:
 def build_novel_generators(
     services: NovelDomainServices,
 ) -> NovelGenerators:
-    generator = DeepSeekGenerator(client=build_deepseek_client())
+    generator = DeepSeekGenerator(
+        client=build_deepseek_client(),
+        temperature=settings.deepseek.TEMPERATURE,
+    )
     codex_service = CodexService(HttpCodexClient(build_codex_client()))
 
     return NovelGenerators(
@@ -104,17 +108,20 @@ def build_novel_generators(
             novel_service=services.novel,
             codex_service=codex_service,
             generator=generator,
+            reasoning_effort=settings.deepseek.NOVEL_REASONING_EFFORT,
         ),
         character=CharacterGenerator(
             novel_service=services.novel,
             character_service=services.character,
             codex_service=codex_service,
             generator=generator,
+            reasoning_effort=settings.deepseek.CHARACTER_REASONING_EFFORT,
         ),
         roadmap=RoadmapGenerator(
             novel_service=services.novel,
             roadmap_service=services.roadmap,
             generator=generator,
+            reasoning_effort=settings.deepseek.ROADMAP_REASONING_EFFORT,
         ),
         scene=SceneGenerator(
             novel_service=services.novel,
@@ -130,6 +137,7 @@ def build_novel_generators(
             character_service=services.character,
             dialogue_line_service=services.dialogue_line,
             generator=generator,
+            reasoning_effort=settings.deepseek.DIALOGUE_REASONING_EFFORT,
         ),
         story_context=StoryContextGenerator(
             novel_service=services.novel,

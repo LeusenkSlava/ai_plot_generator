@@ -64,7 +64,7 @@ def summary() -> None:
         print(f"Нет логов в {LOG_DIR}")
         return
     print(
-        f"{'файл':<20}{'запросов':>9}{'prompt':>10}{'compl':>9}{'кэш':>9}{'всего':>10}{'ошибок':>8}"
+        f"{'файл':<20}{'запросов':>9}{'prompt':>10}{'compl':>9}{'reason':>9}{'кэш':>9}{'всего':>10}{'ошибок':>8}"
     )
     grand = 0
     for f in files:
@@ -72,9 +72,12 @@ def summary() -> None:
         p = sum(r.get("prompt_tokens") or 0 for r in rows)
         c = sum(r.get("completion_tokens") or 0 for r in rows)
         k = sum(r.get("cache_hit_tokens") or 0 for r in rows)
+        rsn = sum(r.get("reasoning_tokens") or 0 for r in rows)
         errors = sum(1 for r in rows if r.get("error"))
         grand += p + c
-        print(f"{f.stem:<20}{len(rows):>9}{p:>10}{c:>9}{k:>9}{p + c:>10}{errors:>8}")
+        print(
+            f"{f.stem:<20}{len(rows):>9}{p:>10}{c:>9}{rsn:>9}{k:>9}{p + c:>10}{errors:>8}"
+        )
     print(f"\nВсего токенов: {grand}")
 
 
@@ -83,12 +86,13 @@ def details(novel_id: str, full: bool) -> None:
     if rows is None:
         return
     print(
-        f"{'#':>3} {'время':<20}{'операция':<14}{'шаг':<24}{'prompt':>8}{'compl':>7}{'симв.':>8}{'сек':>7}"
+        f"{'#':>3} {'время':<20}{'операция':<14}{'шаг':<24}{'prompt':>8}{'compl':>7}{'reason':>8}{'симв.':>8}{'сек':>7}"
     )
     for i, r in enumerate(rows, 1):
         print(
             f"{i:>3} {(r.get('ts') or '')[:19]:<20}{r.get('operation') or '-':<14}{r.get('step') or '-':<24}"
             f"{r.get('prompt_tokens') or 0:>8}{r.get('completion_tokens') or 0:>7}"
+            f"{r.get('reasoning_tokens') or 0:>8}"
             f"{r.get('prompt_chars') or 0:>8}{r.get('duration_s') or 0:>7}"
             + (f"  ERROR: {r.get('error')}" if r.get("error") else "")
         )
@@ -124,7 +128,9 @@ def export_md(novel_id: str) -> None:
         out.append(
             f"\n## {i}. {r.get('operation') or '-'} / {r.get('step') or '-'}\n\n"
             f"prompt: {r.get('prompt_tokens')} ток. ({r.get('prompt_chars')} симв.), "
-            f"ответ: {r.get('completion_tokens')} ток., {r.get('duration_s')} с"
+            f"ответ: {r.get('completion_tokens')} ток."
+            f"{', reasoning: ' + str(r.get('reasoning_tokens')) + ' ток.' if r.get('reasoning_tokens') else ''}"
+            f", {r.get('duration_s')} с"
             + (f", ОШИБКА: {r.get('error')}" if r.get("error") else "")
             + "\n"
         )

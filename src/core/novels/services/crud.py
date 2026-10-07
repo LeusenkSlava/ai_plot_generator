@@ -73,6 +73,10 @@ class SceneService:
         scenes = await self._repository.list_by_roadmap_id(roadmap_id)
         return scenes
 
+    async def list_by_novel(self, novel_id: int) -> list[Scene] | None:
+        scenes = await self._repository.list_by_novel_id(novel_id)
+        return scenes
+
     async def update_story_context(self, scene_id: int, story_context: str) -> None:
         await self._repository.update_story_context(scene_id, story_context)
 

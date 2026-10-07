@@ -93,6 +93,7 @@ class DialogueGenerator(BaseGenerator):
         dialogue_line_service: DialogueLineService,
         codex_service: CodexService,
         generator: GeneratorProtocol,
+        reasoning_effort: str | None = None,
     ):
         super().__init__(generator)
         self._novel_service = novel_service
@@ -101,6 +102,7 @@ class DialogueGenerator(BaseGenerator):
         self._roadmap_service = roadmap_service
         self._character_service = character_service
         self._dialogue_line_service = dialogue_line_service
+        self._reasoning_effort = reasoning_effort
 
     async def generate(
         self,
@@ -140,7 +142,7 @@ class DialogueGenerator(BaseGenerator):
             story_context,
             current_outfits,
         )
-        data = await self._generate(prompt)
+        data = await self._generate(prompt, reasoning_effort=self._reasoning_effort)
 
         lines_data = data.get("dialogue_lines")
         if not lines_data:

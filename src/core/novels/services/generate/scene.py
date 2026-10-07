@@ -27,9 +27,10 @@ class SceneGenerator(BaseGenerator):
         roadmap_id: int,
         previous_scenes: list[Scene] | None = None,
         story_context: str | None = None,
+        order: int | None = None,
     ) -> Scene:
         """Следующая сцена шага роадмапа. previous_scenes — уже сыгранные сцены новеллы для связности,
-        story_context — изложение истории после предыдущей сцены."""
+        story_context — изложение истории после предыдущей сцены. order — сквозной номер сцены в новелле."""
         roadmap = await self._roadmap_service.get(roadmap_id)
         if not roadmap:
             raise GenerationError(f"Roadmap with id {roadmap_id} not found")
@@ -38,18 +39,24 @@ class SceneGenerator(BaseGenerator):
         if not novel:
             raise GenerationError(f"Novel with id {roadmap.novel_id} not found")
 
-        existing = await self._scene_service.list_by_roadmap(roadmap.id) or []
-        order = len(existing) + 1
-        is_final_for_roadmap = order >= max(roadmap.scenes_count, 1)
+        # Позиция сцены внутри шага роадмапа (для финала шага и подсказки в промпте).
+        step_position = len(
+            await self._scene_service.list_by_roadmap(roadmap.id) or []
+        ) + 1
+        # Сквозной номер сцены по всей новелле: по нему идёт идемпотентность и
+        # упорядочивание в NovelState, поэтому он не должен сбрасываться на каждом шаге.
+        if order is None:
+            order = len(await self._scene_service.list_by_novel(novel.id) or []) + 1
+        is_final_for_roadmap = step_position >= max(roadmap.scenes_count, 1)
         roadmaps = await self._roadmap_service.list_by_novel(novel.id) or []
         is_last_roadmap = roadmap.step_id >= max(
             (r.step_id for r in roadmaps), default=0
         )
 
         prompt = self.__create_prompt(
-            novel, roadmap, order, previous_scenes or [], story_context
+            novel, roadmap, step_position, previous_scenes or [], story_context
         )
-        data = await self._generate(prompt)
+        data = await self._generate(prompt, think=False)
 
         scene = Scene(
             id=None,
@@ -69,11 +76,11 @@ class SceneGenerator(BaseGenerator):
         self,
         novel: Novel,
         roadmap: Roadmap,
-        order: int,
+        step_position: int,
         previous_scenes: list[Scene],
         story_context: str | None,
     ) -> list[dict]:
-        scenes_count = max(roadmap.scenes_count, order)
+        scenes_count = max(roadmap.scenes_count, step_position)
         system_prompt = {
             "role": "system",
             "content": (
@@ -114,7 +121,7 @@ class SceneGenerator(BaseGenerator):
         user_content += (
             f"\n\nШаг роадмапа: {roadmap.title}\n"
             f"Цель шага: {roadmap.goal}\n"
-            f"Номер сцены в шаге: {order} из {scenes_count}"
+            f"Номер сцены в шаге: {step_position} из {scenes_count}"
         )
         user_prompt = {"role": "user", "content": user_content}
         return [system_prompt, user_prompt]

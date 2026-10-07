@@ -19,6 +19,8 @@ class FakeGenerator:
         self._errors: list[Exception] = []
         self._default: dict | None = None
         self.calls: list[list[dict]] = []
+        self.think_flags: list[bool] = []
+        self.efforts: list[str | None] = []
 
     # ---------- настройка ----------
 
@@ -41,8 +43,15 @@ class FakeGenerator:
 
     # ---------- GeneratorProtocol ----------
 
-    async def generate(self, prompt: list[dict]) -> dict:
+    async def generate(
+        self,
+        prompt: list[dict],
+        think: bool = True,
+        reasoning_effort: str | None = None,
+    ) -> dict:
         self.calls.append(prompt)
+        self.think_flags.append(think)
+        self.efforts.append(reasoning_effort)
 
         if self._errors:
             raise self._errors.pop(0)

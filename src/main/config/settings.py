@@ -35,6 +35,13 @@ class PostgresSettings(BaseModel):
 class DeepSeekSettings(BaseSettings):
     API_KEY: str
     BASE_URL: str = "https://api.deepseek.com"
+    TEMPERATURE: float = 0.9
+    # Уровень reasoning для шагов с включённым thinking (low/high/max).
+    # Scene и StoryContext генерируются с thinking=disabled, поэтому effort им не нужен.
+    NOVEL_REASONING_EFFORT: str = "high"
+    CHARACTER_REASONING_EFFORT: str = "low"
+    ROADMAP_REASONING_EFFORT: str = "high"
+    DIALOGUE_REASONING_EFFORT: str = "high"
 
 
 class CodexSettings(BaseSettings):

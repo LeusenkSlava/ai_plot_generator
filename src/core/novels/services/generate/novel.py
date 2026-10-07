@@ -16,10 +16,12 @@ class NovelGenerator(BaseGenerator):
         novel_service: NovelService,
         codex_service: CodexService,
         generator: GeneratorProtocol,
+        reasoning_effort: str | None = None,
     ):
         super().__init__(generator)
         self._novel_service = novel_service
         self._codex_service = codex_service
+        self._reasoning_effort = reasoning_effort
 
     async def generate(self, user_prompt: str, universe_id: int | None = None) -> Novel:
         codex_context = None
@@ -27,7 +29,7 @@ class NovelGenerator(BaseGenerator):
             codex_context = await self.__codex_context(universe_id)
 
         prompt = self.__create_prompt(user_prompt, codex_context)
-        data = await self._generate(prompt)
+        data = await self._generate(prompt, reasoning_effort=self._reasoning_effort)
 
         novel = Novel.from_llm(data, universe_id=universe_id)
         novel = await self._novel_service.add(novel)

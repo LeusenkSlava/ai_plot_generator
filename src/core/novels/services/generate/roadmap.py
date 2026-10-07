@@ -15,10 +15,12 @@ class RoadmapGenerator(BaseGenerator):
         novel_service: NovelService,
         roadmap_service: RoadmapService,
         generator: GeneratorProtocol,
+        reasoning_effort: str | None = None,
     ):
         super().__init__(generator)
         self._novel_service = novel_service
         self._roadmap_service = roadmap_service
+        self._reasoning_effort = reasoning_effort
 
     async def generate(self, novel_id: int) -> list[Roadmap]:
         novel = await self._novel_service.get(novel_id)
@@ -26,7 +28,7 @@ class RoadmapGenerator(BaseGenerator):
             raise GenerationError(f"Novel with id {novel_id} not found")
 
         prompt = self.__create_prompt(novel)
-        data = await self._generate(prompt)
+        data = await self._generate(prompt, reasoning_effort=self._reasoning_effort)
 
         roadmap_data = data.get("roadmap")
         if not roadmap_data:
