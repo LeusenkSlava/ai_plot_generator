@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 
-from src.core.codex.models import TagType
+from src.core.codex.models import TagKind, TagType
 
 
 class TagSchema(BaseModel):
@@ -8,6 +8,7 @@ class TagSchema(BaseModel):
     type: TagType
     slug: str
     name: str
+    kind: TagKind | None = None
 
 
 class UniverseSchema(BaseModel):
@@ -61,3 +62,31 @@ class OutfitSchema(BaseModel):
     name: str
     asset_key: str
     tags: list[TagSchema] = []
+
+
+class EmotionTagsRequest(BaseModel):
+    """Тело запроса подбора одной эмоции."""
+
+    sprite_id: int | None = None
+    tags: list[str]
+
+
+class EmotionMatchItemSchema(BaseModel):
+    """Элемент батча подбора эмоций."""
+
+    character_id: int
+    sprite_id: int | None = None
+    tags: list[str]
+
+
+class EmotionTagsResponse(BaseModel):
+    """Доступные персонажу emotion-теги, разделённые по роли."""
+
+    base: list[TagSchema] = []
+    modifiers: list[TagSchema] = []
+
+
+class OutfitMatchRequest(BaseModel):
+    """Тело запроса подбора одной одежды по тегу."""
+
+    tag: str

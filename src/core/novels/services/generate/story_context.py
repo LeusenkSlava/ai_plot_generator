@@ -139,7 +139,7 @@ class StoryContextGenerator(BaseGenerator):
 
         state = StoryState.load(previous_context)
         prompt = self.__create_prompt(novel, scene, characters, lines, state)
-        state.apply(await self._generate(prompt))
+        state.apply(await self._generate(prompt, think=False))
         if not state.render():
             raise GenerationError("Generator returned empty story context")
 

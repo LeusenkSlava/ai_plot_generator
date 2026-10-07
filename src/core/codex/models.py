@@ -10,12 +10,18 @@ class TagType(StrEnum):
     ARCHETYPE = "archetype"
 
 
+class TagKind(StrEnum):
+    BASE = "base"
+    MODIFIER = "modifier"
+
+
 @dataclass
 class Tag:
     id: int
     type: TagType
     slug: str
     name: str
+    kind: TagKind | None = None
 
 
 @dataclass
@@ -75,3 +81,20 @@ class Outfit:
     name: str
     asset_key: str
     tags: list[Tag] = field(default_factory=list)
+
+
+@dataclass
+class EmotionTags:
+    """Доступные персонажу emotion-теги, разделённые по роли."""
+
+    base: list[Tag] = field(default_factory=list)
+    modifiers: list[Tag] = field(default_factory=list)
+
+
+@dataclass
+class EmotionMatchItem:
+    """Запрос подбора эмоции для одного персонажа."""
+
+    character_id: int
+    tags: list[str]
+    sprite_id: int | None = None

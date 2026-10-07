@@ -12,7 +12,7 @@ class BaseGenerator(ABC):
     def __init__(self, generator: GeneratorProtocol):
         self._generator = generator
 
-    async def _generate(self, prompt: list[dict]) -> dict:
+    async def _generate(self, prompt: list[dict], think: bool = True) -> dict:
         try:
             with llm_step(type(self).__name__):
                 return await self._generator.generate(prompt)

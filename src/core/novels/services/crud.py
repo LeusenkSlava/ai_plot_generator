@@ -120,6 +120,9 @@ class DialogueLineService:
     async def list_by_scene(self, scene_id: int) -> list[DialogueLine]:
         return await self._repository.list_by_scene_id(scene_id)
 
+    async def last_outfit_per_character(self, novel_id: int) -> dict[int, str]:
+        return await self._repository.last_outfit_per_character(novel_id)
+
     async def delete(self, dialog_line_id: int) -> None:
         await self._repository.delete(dialog_line_id)
 

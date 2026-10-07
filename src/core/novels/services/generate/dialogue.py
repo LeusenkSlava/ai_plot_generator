@@ -1,7 +1,16 @@
+import asyncio
 import logging
 from dataclasses import dataclass, field
 
-from src.core.codex.models import Background, Emotion, Outfit, Sprite
+from src.core.codex.exceptions import CodexUnavailableError
+from src.core.codex.models import (
+    Background,
+    EmotionTags,
+    Outfit,
+    Sprite,
+    Tag,
+    TagType,
+)
 from src.core.codex.services import CodexService
 from src.core.novels.exceptions import GenerationError
 from src.core.novels.interfaces.generation import GeneratorProtocol
@@ -35,7 +44,6 @@ def _short(text: str, limit: int = SPRITE_DESCRIPTION_MAX_CHARS) -> str:
 class _SpriteAssets:
     sprite: Sprite
     outfits: dict[str, Outfit] = field(default_factory=dict)
-    emotions: dict[str, Emotion] = field(default_factory=dict)
 
 
 @dataclass
@@ -45,9 +53,34 @@ class _Assets:
     backgrounds: dict[str, Background] = field(default_factory=dict)
     # character.id -> sprite.slug -> ассеты спрайта
     sprites: dict[int, dict[str, _SpriteAssets]] = field(default_factory=dict)
+    # character.id -> доступные эмоции-теги (база + модификаторы)
+    emotion_tags: dict[int, EmotionTags] = field(default_factory=dict)
+    # character.id -> доступные теги одежды (outfit_style)
+    outfit_tags: dict[int, list[Tag]] = field(default_factory=dict)
 
     def __bool__(self) -> bool:
         return bool(self.backgrounds or self.sprites)
+
+
+@dataclass
+class _LineAssets:
+    """Подготовленные по реплике ассеты: фон и запросы подбора спрайта/одежды/эмоции."""
+
+    background_asset_key: str | None = None
+    # кандидат-спрайт, выбранный LLM; используется как подсказка для match_emotion
+    sprite_id: int | None = None
+    emotion_tags: list[str] | None = None
+    outfit_tag: str | None = None
+
+
+@dataclass
+class _ResolvedAssets:
+    """Итоговые asset_key реплики после подбора эмоции/спрайта/одежды."""
+
+    background_asset_key: str | None = None
+    sprite_asset_key: str | None = None
+    outfit_asset_key: str | None = None
+    emotion_asset_key: str | None = None
 
 
 class DialogueGenerator(BaseGenerator):
@@ -94,17 +127,10 @@ class DialogueGenerator(BaseGenerator):
             novel.universe_id if novel else None, characters
         )
 
-        # Наряды берём по всей новелле: персонаж мог не говорить в последних репликах
-        novel_lines = (
-            await self._dialogue_line_service.list_by_novel(roadmap.novel_id) or []
-            if assets
-            else []
+        last_outfits = await self._dialogue_line_service.last_outfit_per_character(
+            roadmap.novel_id
         )
-        current_outfits = self.__current_outfits(
-            characters,
-            assets,
-            [line for line in novel_lines if line.scene_id != scene.id],
-        )
+        current_outfits = self.__current_outfits(characters, assets, last_outfits)
 
         prompt = self.__create_prompt(
             scene,
@@ -120,15 +146,26 @@ class DialogueGenerator(BaseGenerator):
         if not lines_data:
             raise GenerationError("Generator returned no dialogue lines")
 
-        dialogue_lines = []
-        last_index = len(lines_data) - 1
-        for index, item in enumerate(lines_data):
+        # Фаза 1: фон (статически) и запросы на подбор спрайта/одежды/эмоции по тегам
+        prepared: list[tuple[Character, dict, _LineAssets]] = []
+        for item in lines_data:
             character = characters_by_name.get(item["character_name"])
             if not character:
                 raise GenerationError(
                     f"Generator referenced unknown character '{item['character_name']}'"
                 )
+            prepared.append(
+                (character, item, self.__prepare_line(item, character, assets))
+            )
 
+        # Фаза 2: подбираем эмоцию/спрайт/одежду через Codex (параллельно)
+        resolved = await self.__match_assets(prepared, assets)
+
+        # Фаза 3: сохраняем реплики с итоговыми asset_key
+        dialogue_lines = []
+        last_index = len(lines_data) - 1
+        for index, (character, item, _) in enumerate(prepared):
+            assets_picked = resolved[index]
             dialogue_line = DialogueLine(
                 id=None,
                 created_at=None,
@@ -139,7 +176,10 @@ class DialogueGenerator(BaseGenerator):
                 order=index + 1,
                 text=item["text"],
                 is_final_for_scene=index == last_index,
-                **self.__pick_assets(item, character, assets),
+                background_asset_key=assets_picked.background_asset_key,
+                sprite_asset_key=assets_picked.sprite_asset_key,
+                outfit_asset_key=assets_picked.outfit_asset_key,
+                emotion_asset_key=assets_picked.emotion_asset_key,
             )
             dialogue_line = await self._dialogue_line_service.add(dialogue_line)
             dialogue_lines.append(dialogue_line)
@@ -161,8 +201,15 @@ class DialogueGenerator(BaseGenerator):
             for character in characters:
                 if character.codex_character_id is None:
                     continue
-                emotions = await self._codex_service.get_emotions(
-                    character.codex_character_id
+                assets.emotion_tags[character.id] = (
+                    await self._codex_service.get_emotion_tags(
+                        character.codex_character_id
+                    )
+                )
+                assets.outfit_tags[character.id] = (
+                    await self._codex_service.get_outfit_tags(
+                        character.codex_character_id
+                    )
                 )
                 by_sprite: dict[str, _SpriteAssets] = {}
                 for sprite in await self._codex_service.get_sprites(
@@ -172,9 +219,6 @@ class DialogueGenerator(BaseGenerator):
                     by_sprite[sprite.slug] = _SpriteAssets(
                         sprite=sprite,
                         outfits={o.slug: o for o in outfits},
-                        emotions={
-                            e.slug: e for e in emotions if e.sprite_id == sprite.id
-                        },
                     )
                 assets.sprites[character.id] = by_sprite
         except Exception as e:
@@ -182,55 +226,147 @@ class DialogueGenerator(BaseGenerator):
         return assets
 
     @staticmethod
-    def __pick_assets(item: dict, character: Character, assets: _Assets) -> dict:
-        """Переводит выбранные LLM slug'и в asset_key Codex. Неизвестный slug -> None, а не падение."""
-        picked = {
-            "background_asset_key": None,
-            "sprite_asset_key": None,
-            "outfit_asset_key": None,
-            "emotion_asset_key": None,
-        }
+    def __prepare_line(
+        item: dict, character: Character, assets: _Assets
+    ) -> _LineAssets:
+        """Переводит выбранные LLM slug'и/теги в запросы подбора ассетов Codex."""
+        line = _LineAssets()
         if not assets:
-            return picked
+            return line
 
         background = assets.backgrounds.get(item.get("background_slug") or "")
-        picked["background_asset_key"] = background.asset_key if background else None
+        line.background_asset_key = background.asset_key if background else None
+        if line.background_asset_key is None and item.get("background_slug"):
+            logger.warning(
+                f"DialogueGenerator: unresolved background_slug for line {item!r}"
+            )
 
         sprite_assets = assets.sprites.get(character.id, {}).get(
             item.get("sprite_slug") or ""
         )
         if sprite_assets:
-            picked["sprite_asset_key"] = sprite_assets.sprite.asset_key
-            outfit = sprite_assets.outfits.get(item.get("outfit_slug") or "")
-            emotion = sprite_assets.emotions.get(item.get("emotion_slug") or "")
-            picked["outfit_asset_key"] = outfit.asset_key if outfit else None
-            picked["emotion_asset_key"] = emotion.asset_key if emotion else None
-
-        missing = [k for k, v in picked.items() if v is None]
-        if missing:
+            line.sprite_id = sprite_assets.sprite.id
+        elif item.get("sprite_slug"):
             logger.warning(
-                f"DialogueGenerator: unresolved assets {missing} for line {item!r}"
+                f"DialogueGenerator: unresolved sprite_slug for line {item!r}"
             )
-        return picked
+
+        base_tag = item.get("emotion_base_tag")
+        if base_tag:
+            modifier_tags = item.get("emotion_modifier_tags") or []
+            line.emotion_tags = [base_tag, *modifier_tags]
+
+        line.outfit_tag = item.get("outfit_tag")
+
+        return line
+
+    async def __match_assets(
+        self, prepared: list[tuple[Character, dict, _LineAssets]], assets: _Assets
+    ) -> list[_ResolvedAssets]:
+        """Подбирает по тегам эмоцию и одежду; финальный спрайт берёт из эмоции."""
+
+        async def resolve(character: Character, line: _LineAssets) -> _ResolvedAssets:
+            result = _ResolvedAssets(background_asset_key=line.background_asset_key)
+            codex_id = character.codex_character_id
+
+            # 1. Эмоция. match_emotion может вернуть эмоцию на другом спрайте,
+            #    поэтому спрайт берём из результата, а не из выбора LLM.
+            emotion = None
+            if codex_id is not None and line.emotion_tags:
+                try:
+                    emotion = await self._codex_service.match_emotion(
+                        codex_id, line.emotion_tags, sprite_id=line.sprite_id
+                    )
+                except CodexUnavailableError as e:
+                    logger.warning(
+                        f"DialogueGenerator: emotion match failed for "
+                        f"{character.name} tags={line.emotion_tags}: {e}"
+                    )
+                if emotion is None:
+                    logger.warning(
+                        f"DialogueGenerator: no emotion matched for "
+                        f"{character.name} tags={line.emotion_tags}"
+                    )
+
+            # 2. Финальный спрайт: из подобранной эмоции, иначе — выбор LLM.
+            final_sprite_id = emotion.sprite_id if emotion else line.sprite_id
+            sprite_assets = self.__sprite_assets_by_id(
+                character.id, final_sprite_id, assets
+            )
+            if sprite_assets:
+                result.sprite_asset_key = sprite_assets.sprite.asset_key
+
+            # 3. Одежда подбирается на финальном спрайте по одному тегу-стилю.
+            if final_sprite_id is not None and line.outfit_tag:
+                try:
+                    outfit = await self._codex_service.match_outfit(
+                        final_sprite_id, line.outfit_tag
+                    )
+                except CodexUnavailableError as e:
+                    logger.warning(
+                        f"DialogueGenerator: outfit match failed for "
+                        f"{character.name} tag={line.outfit_tag} "
+                        f"sprite={final_sprite_id}: {e}"
+                    )
+                    outfit = None
+                if outfit:
+                    result.outfit_asset_key = outfit.asset_key
+                else:
+                    logger.warning(
+                        f"DialogueGenerator: no outfit matched for "
+                        f"{character.name} tag={line.outfit_tag} "
+                        f"sprite={final_sprite_id}"
+                    )
+
+            # 4. Эмоция.
+            if emotion:
+                result.emotion_asset_key = emotion.asset_key
+
+            return result
+
+        return await asyncio.gather(
+            *(resolve(character, line) for character, _, line in prepared)
+        )
+
+    @staticmethod
+    def __sprite_assets_by_id(
+        character_id: int, sprite_id: int | None, assets: _Assets
+    ) -> _SpriteAssets | None:
+        if sprite_id is None:
+            return None
+        for sa in assets.sprites.get(character_id, {}).values():
+            if sa.sprite.id == sprite_id:
+                return sa
+        return None
 
     @staticmethod
     def __current_outfits(
-        characters: list[Character], assets: _Assets, lines: list[DialogueLine]
+        characters: list[Character], assets: _Assets, last_outfits: dict[int, str]
     ) -> str:
-        """Последний наряд каждого персонажа по репликам: asset_key -> slug каталога."""
-        outfits: dict[int, str] = {}
-        for line in lines:
-            if not line.outfit_asset_key:
+        """Резолв последнего наряда каждого персонажа: asset_key -> тег одежды."""
+        lines: list[str] = []
+
+        for c in characters:
+            asset_key = last_outfits.get(c.id)
+            if not asset_key:
                 continue
-            for sprite_slug, sa in assets.sprites.get(line.character_id, {}).items():
+            for sa in assets.sprites.get(c.id, {}).values():
                 for outfit in sa.outfits.values():
-                    if outfit.asset_key == line.outfit_asset_key:
-                        outfits[line.character_id] = (
-                            f"sprite_slug {sprite_slug}, outfit_slug {outfit.slug} ({outfit.name})"
+                    if outfit.asset_key == asset_key:
+                        tag = next(
+                            (
+                                t.slug
+                                for t in outfit.tags
+                                if t.type == TagType.OUTFIT_STYLE
+                            ),
+                            None,
                         )
-        return "\n".join(
-            f"- {c.name}: {outfits[c.id]}" for c in characters if c.id in outfits
-        )
+                        if tag:
+                            lines.append(
+                                f"- {c.name}: outfit_tag {tag} ({outfit.name})"
+                            )
+                        break
+        return "\n".join(lines)
 
     @staticmethod
     def __assets_catalog(characters: list[Character], assets: _Assets) -> str:
@@ -243,11 +379,22 @@ class DialogueGenerator(BaseGenerator):
             lines.append(f"Спрайты (sprite_slug) персонажа {character.name}:")
             for slug, sa in sprites.items():
                 lines.append(f"- {slug}: {_short(sa.sprite.description)}")
-                lines.append(
-                    f"  наряды: {', '.join(f'{o.slug}={o.name}' for o in sa.outfits.values()) or '-'}"
+            tags = assets.emotion_tags.get(character.id)
+            if tags:
+                base = ", ".join(f"{t.slug}={t.name}" for t in tags.base) or "-"
+                modifiers = (
+                    ", ".join(f"{t.slug}={t.name}" for t in tags.modifiers) or "-"
+                )
+                lines.append(f"Эмоции персонажа {character.name}:")
+                lines.append(f"  базовые (emotion_base_tag): {base}")
+                lines.append(f"  модификаторы (emotion_modifier_tags): {modifiers}")
+            outfit_tags = assets.outfit_tags.get(character.id)
+            if outfit_tags:
+                styles = (
+                    ", ".join(f"{t.slug}={t.name}" for t in outfit_tags) or "-"
                 )
                 lines.append(
-                    f"  эмоции: {', '.join(f'{e.slug}={e.name}' for e in sa.emotions.values()) or '-'}"
+                    f"Одежда персонажа {character.name} (outfit_tag): {styles}"
                 )
         return "\n".join(lines)
 
@@ -299,11 +446,14 @@ class DialogueGenerator(BaseGenerator):
                 "- background_slug - фон, подходящий месту и времени сцены (обычно один на всю сцену, "
                 "меняй только если действие переходит в другое место);\n"
                 "- sprite_slug - спрайт говорящего персонажа;\n"
-                "- outfit_slug - наряд из списка выбранного спрайта;\n"
-                "- emotion_slug - эмоция из списка выбранного спрайта, соответствующая тексту реплики.\n"
-                "Если подходящего ассета нет - ставь null.\n"
+                "- outfit_tag - ОДИН тег стиля одежды из списка одежды говорящего;\n"
+                "- emotion_base_tag - ОДИН главный тег эмоции говорящего из его базовых эмоций, "
+                "соответствующий тексту реплики;\n"
+                "- emotion_modifier_tags - список из 0 и более тегов-уточнений эмоции "
+                "из модификаторов говорящего.\n"
+                "Если подходящего ассета нет - ставь null; для emotion_modifier_tags ставь пустой список [].\n"
                 "Наряд персонажа не меняется между репликами и сценами: используй его текущий "
-                "outfit_slug, пока по сюжету персонаж явно не переоделся."
+                "outfit_tag, пока по сюжету персонаж явно не переоделся."
             )
             user_content += (
                 f"\n\nКаталог ассетов:\n{self.__assets_catalog(characters, assets)}"

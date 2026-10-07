@@ -1,6 +1,31 @@
 from datetime import datetime
 
-from src.core.novels.models import DialogueLine, Novel, Roadmap, Scene
+from src.core.novels.models import Character, DialogueLine, Novel, Roadmap, Scene
+
+
+def novel_character_domain(
+    *,
+    id: int | None = None,
+    created_at: datetime | None = None,
+    updated_at: datetime | None = None,
+    novel_id: int = 1,
+    name: str = "Алиса",
+    role: str = "Ведьма",
+    arc: str = "Найти пропавшего брата",
+    voice_notes: str = "Говорит тихо",
+    codex_character_id: int | None = None,
+) -> Character:
+    return Character(
+        id=id,
+        created_at=created_at,
+        updated_at=updated_at,
+        novel_id=novel_id,
+        name=name,
+        role=role,
+        arc=arc,
+        voice_notes=voice_notes,
+        codex_character_id=codex_character_id,
+    )
 
 
 def novel_domain(
@@ -126,3 +151,19 @@ def dialogue_line_domain(
         outfit_asset_key=outfit_asset_key,
         emotion_asset_key=emotion_asset_key,
     )
+
+
+def dialogue_line_payload(
+    *,
+    character_name: str = "Алиса",
+    text: str = "Реплика",
+    **asset_fields,
+) -> dict:
+    """Одна реплика в ответе LLM. asset_fields — необязательные
+    background_slug/sprite_slug/outfit_tag/emotion_base_tag/emotion_modifier_tags."""
+    return {"character_name": character_name, "text": text, **asset_fields}
+
+
+def valid_dialogue_llm_payload(*lines: dict) -> dict:
+    """Валидный ответ LLM генератора диалога: список реплик."""
+    return {"dialogue_lines": list(lines)}

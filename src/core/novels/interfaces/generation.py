@@ -2,7 +2,7 @@ from typing import Protocol
 
 
 class GeneratorProtocol(Protocol):
-    async def generate(self, prompt: list) -> dict:
+    async def generate(self, prompt: list, think: bool = True) -> dict:
         """Возвращает (title, description) на основе пожелания пользователя."""
         ...
 

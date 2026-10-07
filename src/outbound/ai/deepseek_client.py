@@ -15,7 +15,7 @@ class DeepSeekGenerator:
     def __init__(self, client: AsyncOpenAI):
         self._client = client
 
-    async def generate(self, prompt: list) -> dict:
+    async def generate(self, prompt: list, think: bool = True) -> dict:
         started = time.monotonic()
         try:
             response = await self._client.chat.completions.create(
@@ -23,6 +23,7 @@ class DeepSeekGenerator:
                 messages=prompt,
                 response_format={"type": "json_object"},
                 temperature=0.9,
+                extra_body={"think": think},
             )
         except (APIError, APIConnectionError) as e:
             log_llm_call(

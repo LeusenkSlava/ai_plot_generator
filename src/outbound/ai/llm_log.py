@@ -1,21 +1,28 @@
-"""Запись всех запросов к LLM в JSONL-файлы, сгруппированные по новеллам.
-
-llm_logs/novel_<id>.jsonl — вызовы конкретной новеллы,
-llm_logs/unassigned.jsonl — вызовы вне контекста новеллы (или упавшие до её создания).
-Каталог задаётся переменной окружения LLM_LOG_DIR. Сводка: scripts/llm_report.py
-"""
-
 import json
 import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
 
-from src.core.novels.llm_trace import LLMTrace, current_step, current_trace, set_pending_sink
+from src.core.novels.interfaces.usage_publisher import LLMUsagePublisher
+from src.core.novels.llm_trace import (
+    LLMTrace,
+    current_step,
+    current_trace,
+    set_pending_sink,
+)
 
 logger = logging.getLogger(__name__)
 
 LOG_DIR = Path(os.getenv("LLM_LOG_DIR", "llm_logs"))
+
+# Регистрируется из main.run при старте; пока не задан — аналитика просто не шлётся.
+_usage_publisher: LLMUsagePublisher | None = None
+
+
+def set_usage_publisher(publisher: LLMUsagePublisher) -> None:
+    global _usage_publisher
+    _usage_publisher = publisher
 
 
 def _write(name: str, records: list[dict]) -> None:
@@ -26,6 +33,21 @@ def _write(name: str, records: list[dict]) -> None:
                 f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
     except OSError as e:
         logger.error(f"llm_log: failed to write {name}: {e}")
+
+
+def _publish(records: list[dict], entity_id: int | None) -> None:
+    """Отправляет события аналитики в том же месте, где пишется файл.
+
+    Здесь novel_id уже известен (для буферизованных записей — после bind),
+    поэтому entity_id заполняется корректно.
+    """
+    if _usage_publisher is None:
+        return
+    for record in records:
+        try:
+            _usage_publisher.publish(record, entity_id)
+        except Exception as e:
+            logger.error(f"llm_log: usage publish failed: {e}")
 
 
 def log_llm_call(
@@ -40,7 +62,10 @@ def log_llm_call(
     extra: dict | None = None,
 ) -> None:
     trace = current_trace()
-    prompt_chars = sum(len(str(m.get("content", ""))) if isinstance(m, dict) else len(str(m)) for m in messages)
+    prompt_chars = sum(
+        len(str(m.get("content", ""))) if isinstance(m, dict) else len(str(m))
+        for m in messages
+    )
     record = {
         "ts": datetime.now(timezone.utc).isoformat(),
         "operation": trace.operation if trace else None,
@@ -59,18 +84,21 @@ def log_llm_call(
     }
     if trace is None:
         _write("unassigned", [record])
+        _publish([record], None)
     elif trace.novel_id is None:
         trace.pending.append(record)
     else:
         # Накопленное до создания новеллы пишем вместе с первой записью после bind
-        _write(f"novel_{trace.novel_id}", [*trace.pending, record])
+        records = [*trace.pending, record]
+        _write(f"novel_{trace.novel_id}", records)
+        _publish(records, trace.novel_id)
         trace.pending.clear()
-
 
 
 def _flush_pending(trace: LLMTrace) -> None:
     name = f"novel_{trace.novel_id}" if trace.novel_id is not None else "unassigned"
     _write(name, trace.pending)
+    _publish(trace.pending, trace.novel_id)
     trace.pending.clear()
 
 

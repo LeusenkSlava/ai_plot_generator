@@ -12,6 +12,8 @@ from src.main.config.logging import setup_logging
 from src.main.config.settings import settings
 from src.main.setup.background_tasks import BackgroundTaskRunner
 from src.outbound.ai.client import build_deepseek_client, close_deepseek_client
+from src.outbound.ai.llm_log import set_usage_publisher
+from src.outbound.analytics import KafkaLLMUsagePublisher, backfill_usage_logs
 from src.outbound.codex.client import build_codex_client, close_codex_client
 from src.outbound.database.session import engine
 from src.outbound.kafka.producer import build_producer
@@ -26,6 +28,20 @@ async def lifespan(app: FastAPI):
 
     producer = build_producer()
     await producer.start()
+
+    usage_publisher = KafkaLLMUsagePublisher(
+        producer=producer,
+        topic=settings.analytics.KAFKA_TOPIC,
+        service=settings.app.SERVICE_ID,
+    )
+    set_usage_publisher(usage_publisher)
+
+    # Догрузка уже существующих логов до того, как начнётся генерация новых.
+    await backfill_usage_logs(
+        producer=producer,
+        topic=settings.analytics.KAFKA_TOPIC,
+        service=settings.app.SERVICE_ID,
+    )
 
     consumer = build_consumer()
     await consumer.start()
@@ -43,6 +59,7 @@ async def lifespan(app: FastAPI):
 
     await background_tasks.shutdown()
     await consumer.stop()
+    await usage_publisher.flush()
     await producer.stop()
     await close_deepseek_client()
     await close_codex_client()

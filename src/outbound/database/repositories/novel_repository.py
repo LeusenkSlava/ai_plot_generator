@@ -302,6 +302,22 @@ class DialogueLineRepository:
         )
         return [self._to_domain(r) for r in result.scalars().all()]
 
+    async def last_outfit_per_character(self, novel_id: int) -> dict[int, str]:
+        stmt = (
+            select(DialogueLineModel.character_id, DialogueLineModel.outfit_asset_key)
+            .where(
+                DialogueLineModel.novel_id == novel_id,
+                DialogueLineModel.outfit_asset_key.isnot(None),
+            )
+            .distinct(DialogueLineModel.character_id)
+            .order_by(
+                DialogueLineModel.character_id,
+                DialogueLineModel.id.desc(),
+            )
+        )
+        rows = (await self._session.execute(stmt)).all()
+        return dict(rows)
+
     async def delete(self, dialog_line_id: int) -> None:
         db_dialog_line = await self._session.get(DialogueLineModel, dialog_line_id)
         if db_dialog_line:

@@ -18,7 +18,6 @@ class LLMTrace:
 
 _trace: ContextVar[LLMTrace | None] = ContextVar("llm_trace", default=None)
 _step: ContextVar[str | None] = ContextVar("llm_step", default=None)
-# Куда сбросить незаписанные записи при выходе из трассировки (outbound регистрирует writer)
 _pending_sink: Callable[[LLMTrace], None] | None = None
 
 

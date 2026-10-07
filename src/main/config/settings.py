@@ -1,9 +1,13 @@
 from pydantic import BaseModel, PostgresDsn
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from src.outbound.kafka.topic import Topics
+
 
 class AppSettings(BaseModel):
     SERVICE_NAME: str = "AI Plot Generator"
+    # Машинный идентификатор сервиса для аналитики (env: APP__SERVICE_ID)
+    SERVICE_ID: str = "ai_plot_generator"
     ROOT_PATH: str = "/"
     DEBUG_MODE: bool = False
     LOGGING_LEVEL: str = "INFO"
@@ -44,6 +48,13 @@ class KafkaSettings(BaseSettings):
     GROUP_ID: str = "ai-plot"
 
 
+class AnalyticsSettings(BaseSettings):
+    """Настройки отдельного сервиса аналитики использования LLM."""
+
+    # Топик, в который публикуются события (env: ANALYTICS__KAFKA_TOPIC)
+    KAFKA_TOPIC: str = Topics.LLM_USAGE
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -55,6 +66,7 @@ class Settings(BaseSettings):
     deepseek: DeepSeekSettings
     kafka: KafkaSettings
     codex: CodexSettings = CodexSettings()
+    analytics: AnalyticsSettings = AnalyticsSettings()
 
 
 settings = Settings()
