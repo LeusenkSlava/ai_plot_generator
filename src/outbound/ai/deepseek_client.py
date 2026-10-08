@@ -2,6 +2,7 @@ import json
 import logging
 import time
 
+from json_repair import repair_json
 from openai import APIConnectionError, APIError, AsyncOpenAI
 
 from src.outbound.ai.llm_log import log_llm_call
@@ -9,6 +10,39 @@ from src.outbound.ai.llm_log import log_llm_call
 logger = logging.getLogger(__name__)
 
 MODEL = "deepseek-v4-flash"
+
+
+def _is_truncated(text: str) -> bool:
+    """True, если JSON структурно неполон (обрезан по лимиту токенов).
+
+    Считаем обрезанным только незакрытую строку или незакрытые ``{``/``[``.
+    Лишние закрывающие скобки и прочий мусор сюда не относятся — их оставляем
+    на json-repair (или на ретрай, если и он не справится).
+    """
+    stack: list[str] = []
+    in_string = False
+    escape = False
+    for ch in text:
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+        elif ch == '"':
+            in_string = True
+        elif ch == "{":
+            stack.append("}")
+        elif ch == "[":
+            stack.append("]")
+        elif ch == "}":
+            if stack and stack[-1] == "}":
+                stack.pop()
+        elif ch == "]":
+            if stack and stack[-1] == "]":
+                stack.pop()
+    return in_string or bool(stack)
 
 
 class DeepSeekGenerator:
@@ -56,6 +90,28 @@ class DeepSeekGenerator:
             details = getattr(usage, "completion_tokens_details", None)
             if details is not None:
                 reasoning_tokens = getattr(details, "reasoning_tokens", None)
+
+        data: dict | None = None
+        json_repaired = False
+        parse_error: Exception | None = None
+        try:
+            data = json.loads(content)
+        except (json.JSONDecodeError, KeyError) as e:
+            parse_error = e
+            if not _is_truncated(content):
+                try:
+                    data = json.loads(repair_json(content))
+                    json_repaired = True
+                    parse_error = None
+                except Exception:
+                    pass  # parse_error уже хранит исходную ошибку
+
+        extra = {
+            "cache_hit_tokens": getattr(usage, "prompt_cache_hit_tokens", None),
+            "reasoning_tokens": reasoning_tokens,
+        }
+        if json_repaired:
+            extra["json_repaired"] = True
         log_llm_call(
             model=MODEL,
             messages=prompt,
@@ -63,13 +119,12 @@ class DeepSeekGenerator:
             prompt_tokens=usage.prompt_tokens if usage else None,
             completion_tokens=usage.completion_tokens if usage else None,
             duration_s=time.monotonic() - started,
-            extra={
-                "cache_hit_tokens": getattr(usage, "prompt_cache_hit_tokens", None),
-                "reasoning_tokens": reasoning_tokens,
-            },
+            error="invalid json" if parse_error is not None else None,
+            extra=extra,
         )
-        try:
-            data = json.loads(content)
-            return data
-        except (json.JSONDecodeError, KeyError) as e:
-            raise RuntimeError(f"Invalid DeepSeek response format: {e}") from e
+
+        if parse_error is not None:
+            raise RuntimeError(
+                f"Invalid DeepSeek response format: {parse_error}"
+            ) from parse_error
+        return data
