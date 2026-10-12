@@ -19,6 +19,8 @@ class Character:
     # id персонажа в Codex; только для новелл с universe_id
     codex_character_id: int | None = None
 
+    is_protagonist: bool = False
+
 
 @dataclass
 class Roadmap:
@@ -96,6 +98,9 @@ class DialogueLine:
     text: str
     # последняя реплика сцены
     is_final_for_scene: bool
+    # внутренние мысли персонажа (не произносится вслух). Значимо только для
+    # протагониста; для остальных персонажей всегда false.
+    is_thought: bool = False
 
     # asset_key ассетов Codex; заполняются только для новелл с universe_id
     background_asset_key: str | None = None

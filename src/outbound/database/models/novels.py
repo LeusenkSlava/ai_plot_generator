@@ -15,6 +15,9 @@ class CharacterModel(BaseModel):
     arc: Mapped[str] = mapped_column(String, nullable=False)
     voice_notes: Mapped[str] = mapped_column(String, nullable=False)
     codex_character_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    is_protagonist: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
 
     novel: Mapped["NovelModel"] = relationship(
         "NovelModel", back_populates="characters"
@@ -129,6 +132,7 @@ class DialogueLineModel(BaseModel):
     is_final_for_scene: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False
     )
+    is_thought: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     background_asset_key: Mapped[str | None] = mapped_column(String, nullable=True)
     sprite_asset_key: Mapped[str | None] = mapped_column(String, nullable=True)
     outfit_asset_key: Mapped[str | None] = mapped_column(String, nullable=True)

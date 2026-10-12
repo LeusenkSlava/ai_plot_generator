@@ -7,6 +7,8 @@ from pydantic import TypeAdapter, ValidationError
 from src.core.codex.exceptions import CodexUnavailableError
 from src.core.codex.models import (
     Background,
+    BackgroundMatchItem,
+    BackgroundTags,
     CodexCharacter,
     Emotion,
     EmotionMatchItem,
@@ -17,7 +19,10 @@ from src.core.codex.models import (
     Universe,
 )
 from src.outbound.codex.schemas import (
+    BackgroundMatchItemSchema,
     BackgroundSchema,
+    BackgroundTagsRequest,
+    BackgroundTagsResponse,
     CharacterSchema,
     EmotionMatchItemSchema,
     EmotionSchema,
@@ -129,6 +134,38 @@ class HttpCodexClient:
             f"/universes/{universe_id}/backgrounds", BackgroundSchema
         )
         return [self._to_domain(i, Background) for i in items]
+
+    async def get_background_tags(self, universe_id: int) -> BackgroundTags:
+        item = await self._get_one(
+            f"/universes/{universe_id}/backgrounds/tags", BackgroundTagsResponse
+        )
+        return BackgroundTags(base=_tags(item.base), modifiers=_tags(item.modifiers))
+
+    async def match_background(
+        self, universe_id: int, tags: list[str]
+    ) -> Background | None:
+        url = f"/universes/{universe_id}/backgrounds/match"
+        payload = BackgroundTagsRequest(tags=tags).model_dump()
+        return await self._post_one_or_none(url, payload, BackgroundSchema, Background)
+
+    async def match_backgrounds_batch(
+        self, items: list[BackgroundMatchItem]
+    ) -> dict[int, Background | None]:
+        url = "/universes/backgrounds/batch"
+        payload = [
+            BackgroundMatchItemSchema(universe_id=i.universe_id, tags=i.tags).model_dump()
+            for i in items
+        ]
+        data = await self._post(url, payload)
+        try:
+            parsed = TypeAdapter(dict[int, BackgroundSchema | None]).validate_python(data)
+        except ValidationError as e:
+            logger.error(f"HttpCodexClient POST {url}: {e}")
+            raise CodexUnavailableError(f"Codex request failed: {url}: {e}") from e
+        return {
+            universe_id: self._to_domain(b, Background) if b is not None else None
+            for universe_id, b in parsed.items()
+        }
 
     async def get_sprites(self, character_id: int) -> list[Sprite]:
         items = await self._get(f"/characters/{character_id}/sprites", SpriteSchema)

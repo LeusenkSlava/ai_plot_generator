@@ -86,6 +86,26 @@ class EmotionTagsResponse(BaseModel):
     modifiers: list[TagSchema] = []
 
 
+class BackgroundTagsResponse(BaseModel):
+    """Доступные вселенной теги задников, разделённые по роли (kind)."""
+
+    base: list[TagSchema] = []
+    modifiers: list[TagSchema] = []
+
+
+class BackgroundTagsRequest(BaseModel):
+    """Тело запроса подбора одного задника по тегам-смыслам."""
+
+    tags: list[str]
+
+
+class BackgroundMatchItemSchema(BaseModel):
+    """Элемент батча подбора задников: вселенная + набор тегов-смыслов."""
+
+    universe_id: int
+    tags: list[str]
+
+
 class OutfitMatchRequest(BaseModel):
     """Тело запроса подбора одной одежды по тегу."""
 

@@ -1,4 +1,4 @@
-from src.core.novels.services.generate.story_context import (
+from src.core.novels.services.generation.generators.story_context import (
     MAX_KEY_FACTS,
     MAX_USED_PHRASES,
     StoryState,

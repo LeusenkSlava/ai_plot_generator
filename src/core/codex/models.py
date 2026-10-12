@@ -8,6 +8,8 @@ class TagType(StrEnum):
     LOCATION = "location"
     TIME_OF_DAY = "time_of_day"
     ARCHETYPE = "archetype"
+    MUSIC = "music"
+    SFX = "sfx"
 
 
 class TagKind(StrEnum):
@@ -98,3 +100,19 @@ class EmotionMatchItem:
     character_id: int
     tags: list[str]
     sprite_id: int | None = None
+
+
+@dataclass
+class BackgroundTags:
+    """Доступные вселенной теги задников, разделённые по роли (kind)."""
+
+    base: list[Tag] = field(default_factory=list)
+    modifiers: list[Tag] = field(default_factory=list)
+
+
+@dataclass
+class BackgroundMatchItem:
+    """Запрос подбора задника для одной вселенной."""
+
+    universe_id: int
+    tags: list[str]

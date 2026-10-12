@@ -6,7 +6,8 @@ from src.core.novels.exceptions import GenerationError
 from src.core.novels.interfaces.generation import GeneratorProtocol
 from src.core.novels.models import Character, Novel
 from src.core.novels.services.crud import CharacterService, NovelService
-from src.core.novels.services.generate.base import BaseGenerator
+from src.core.novels.services.generation.generators.base import BaseGenerator
+from src.core.novels.services.generation.prompts.context import render_character_catalog
 
 logger = logging.getLogger(__name__)
 
@@ -66,11 +67,35 @@ class CharacterGenerator(BaseGenerator):
                 arc=item["arc"],
                 voice_notes=item["voice_notes"],
                 codex_character_id=codex_character.id if codex_character else None,
+                is_protagonist=bool(item.get("is_protagonist", False)),
             )
-            character = await self._character_service.add(character)
             characters.append(character)
 
-        return characters
+        self.__ensure_single_protagonist(characters)
+
+        saved = []
+        for character in characters:
+            character = await self._character_service.add(character)
+            saved.append(character)
+
+        return saved
+
+    @staticmethod
+    def __ensure_single_protagonist(characters: list[Character]) -> None:
+        """Инвариант: главный герой ровно один.
+
+        Если LLM вернул несколько — оставляем первого и сбрасываем остальных;
+        если ни одного — назначаем первого персонажа.
+        """
+        protagonists = [c for c in characters if c.is_protagonist]
+        if len(protagonists) == 1:
+            return
+        if protagonists:
+            for c in protagonists[1:]:
+                c.is_protagonist = False
+            return
+        if characters:
+            characters[0].is_protagonist = True
 
     def __create_prompt(
         self, novel: Novel, codex_characters: list[CodexCharacter]
@@ -87,6 +112,9 @@ class CharacterGenerator(BaseGenerator):
                 "2. role - роль в истории (протагонист, антагонист, союзник, love interest и т.д.).\n"
                 "3. arc - краткое описание сюжетной арки персонажа.\n"
                 "4. voice_notes - заметки о манере речи и характере, которые помогут в дальнейшем генерировать диалоги.\n"
+                "5. is_protagonist - boolean. true ТОЛЬКО для главного героя/героини, "
+                "от чьего лица игрок переживает историю; у него не отображается спрайт, "
+                "и в диалогах доступны его внутренние мысли. Главный герой должен быть РОВНО один.\n"
                 "Отвечай СТРОГО в формате JSON, соответствующего этой схеме:\n"
                 """
                 {
@@ -95,7 +123,8 @@ class CharacterGenerator(BaseGenerator):
                       "name": string,
                       "role": string,
                       "arc": string,
-                      "voice_notes": string
+                      "voice_notes": string,
+                      "is_protagonist": boolean
                     }
                   ]
                 }
@@ -111,14 +140,14 @@ class CharacterGenerator(BaseGenerator):
             system_prompt["content"] += (
                 "\nИстория происходит в существующей вселенной. Бери персонажей ТОЛЬКО из базы знаний ниже: "
                 "имя, характер и манеру речи передавай точно по их описанию, ничего не выдумывай. "
-                "Для каждого персонажа добавь поле codex_slug - slug персонажа из базы знаний, точно как в списке."
+                "Для каждого персонажа добавь поле codex_slug - slug персонажа из базы знаний, точно как в списке.\n"
+                "Главного героя определяй по описанию истории, а не по базе знаний: если в описании главный герой — "
+                "другой человек, который занимает место главного героя этой вселенной, сделай протагонистом его "
+                "(is_protagonist=true, codex_slug не указывай). В характеристиках остальных персонажей, где "
+                "упоминается прежний главный герой, заменяй его имя на имя нового главного героя, сохраняя факты — "
+                "в том числе с кем живёт персонаж (например, «живёт в домике с Семёном» → «живёт в домике с Кахевником»)."
             )
-            catalog = "\n".join(
-                f"- slug: {c.slug}; имя: {c.name}; описание: {c.description}"
-                + (f"; манера речи: {c.speech_style}" if c.speech_style else "")
-                + (f"; теги: {', '.join(t.name for t in c.tags)}" if c.tags else "")
-                for c in codex_characters
-            )
+            catalog = render_character_catalog(codex_characters)
             user_content += f"\nПерсонажи из базы знаний:\n{catalog}"
         user_prompt = {"role": "user", "content": user_content}
         return [system_prompt, user_prompt]

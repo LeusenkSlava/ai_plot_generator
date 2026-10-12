@@ -10,7 +10,7 @@ from src.core.novels.exceptions import (
     NovelNotFoundError,
     SceneOrderError,
 )
-from src.core.novels.services.continuation import SceneContinuationService
+from src.core.novels.services.generation.continuation import SceneContinuationService
 
 logger = logging.getLogger(__name__)
 

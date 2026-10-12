@@ -31,6 +31,7 @@ class CharacterRepository:
             arc=character.arc,
             voice_notes=character.voice_notes,
             codex_character_id=character.codex_character_id,
+            is_protagonist=character.is_protagonist,
         )
         self._session.add(db_character)
         await self._session.flush()
@@ -66,6 +67,7 @@ class CharacterRepository:
             arc=db_character.arc,
             voice_notes=db_character.voice_notes,
             codex_character_id=db_character.codex_character_id,
+            is_protagonist=db_character.is_protagonist,
         )
 
 
@@ -262,6 +264,7 @@ class DialogueLineRepository:
             order=dialog_line.order,
             text=dialog_line.text,
             is_final_for_scene=dialog_line.is_final_for_scene,
+            is_thought=dialog_line.is_thought,
             background_asset_key=dialog_line.background_asset_key,
             sprite_asset_key=dialog_line.sprite_asset_key,
             outfit_asset_key=dialog_line.outfit_asset_key,
@@ -335,6 +338,7 @@ class DialogueLineRepository:
             order=db_dialog_line.order,
             text=db_dialog_line.text,
             is_final_for_scene=db_dialog_line.is_final_for_scene,
+            is_thought=db_dialog_line.is_thought,
             background_asset_key=db_dialog_line.background_asset_key,
             sprite_asset_key=db_dialog_line.sprite_asset_key,
             outfit_asset_key=db_dialog_line.outfit_asset_key,

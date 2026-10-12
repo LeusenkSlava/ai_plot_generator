@@ -62,10 +62,9 @@ class DeepSeekGenerator:
             "messages": prompt,
             "response_format": {"type": "json_object"},
             "temperature": self._temperature,
-            # thinking mode: enabled/disabled, см. api-docs.deepseek.com/guides/thinking_mode
             "extra_body": {"thinking": {"type": "enabled" if think else "disabled"}},
         }
-        # reasoning_effort — top-level параметр (не в extra_body), действует при enabled
+
         if reasoning_effort is not None:
             request["reasoning_effort"] = reasoning_effort
         try:

@@ -2,9 +2,15 @@ import logging
 
 from src.core.novels.exceptions import GenerationError
 from src.core.novels.interfaces.generation import GeneratorProtocol
-from src.core.novels.models import Novel, Roadmap, Scene
-from src.core.novels.services.crud import NovelService, RoadmapService, SceneService
-from src.core.novels.services.generate.base import BaseGenerator
+from src.core.novels.models import Character, Novel, Roadmap, Scene
+from src.core.novels.services.crud import (
+    CharacterService,
+    NovelService,
+    RoadmapService,
+    SceneService,
+)
+from src.core.novels.services.generation.generators.base import BaseGenerator
+from src.core.novels.services.generation.prompts.cast import find_protagonist, render_cast
 
 logger = logging.getLogger(__name__)
 
@@ -15,12 +21,14 @@ class SceneGenerator(BaseGenerator):
         novel_service: NovelService,
         roadmap_service: RoadmapService,
         scene_service: SceneService,
+        character_service: CharacterService,
         generator: GeneratorProtocol,
     ):
         super().__init__(generator)
         self._novel_service = novel_service
         self._roadmap_service = roadmap_service
         self._scene_service = scene_service
+        self._character_service = character_service
 
     async def generate(
         self,
@@ -39,6 +47,8 @@ class SceneGenerator(BaseGenerator):
         if not novel:
             raise GenerationError(f"Novel with id {roadmap.novel_id} not found")
 
+        characters = await self._character_service.list_by_novel(novel.id) or []
+
         # Позиция сцены внутри шага роадмапа (для финала шага и подсказки в промпте).
         step_position = len(
             await self._scene_service.list_by_roadmap(roadmap.id) or []
@@ -54,7 +64,12 @@ class SceneGenerator(BaseGenerator):
         )
 
         prompt = self.__create_prompt(
-            novel, roadmap, step_position, previous_scenes or [], story_context
+            novel,
+            roadmap,
+            characters,
+            step_position,
+            previous_scenes or [],
+            story_context,
         )
         data = await self._generate(prompt, think=False)
 
@@ -76,6 +91,7 @@ class SceneGenerator(BaseGenerator):
         self,
         novel: Novel,
         roadmap: Roadmap,
+        characters: list[Character],
         step_position: int,
         previous_scenes: list[Scene],
         story_context: str | None,
@@ -107,6 +123,14 @@ class SceneGenerator(BaseGenerator):
         user_content = (
             f"Название истории: {novel.title}\n" f"Тон повествования: {novel.tone}"
         )
+        if characters:
+            user_content += f"\nПерсонажи:\n{render_cast(characters)}"
+            protagonist = find_protagonist(characters)
+            if protagonist:
+                user_content += (
+                    f"\n\nГлавный герой: {protagonist.name} — протагонист. "
+                    "Сцена должна подаваться через его восприятие: его цели, чувства и выборы."
+                )
         if story_context:
             user_content += (
                 "\n\nИзложение истории на данный момент (сцена не должна ему противоречить; "

@@ -2,12 +2,14 @@ import logging
 
 from src.core.novels.llm_trace import llm_trace
 from src.core.novels.models import Novel
-from src.core.novels.services.generate.character import CharacterGenerator
-from src.core.novels.services.generate.dialogue import DialogueGenerator
-from src.core.novels.services.generate.novel import NovelGenerator
-from src.core.novels.services.generate.roadmap import RoadmapGenerator
-from src.core.novels.services.generate.scene import SceneGenerator
-from src.core.novels.services.generate.story_context import StoryContextGenerator
+from src.core.novels.services.generation.generators.character import CharacterGenerator
+from src.core.novels.services.generation.generators.dialogue import DialogueGenerator
+from src.core.novels.services.generation.generators.novel import NovelGenerator
+from src.core.novels.services.generation.generators.roadmap import RoadmapGenerator
+from src.core.novels.services.generation.generators.scene import SceneGenerator
+from src.core.novels.services.generation.generators.story_context import (
+    StoryContextGenerator,
+)
 
 logger = logging.getLogger(__name__)
 

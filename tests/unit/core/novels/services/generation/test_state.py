@@ -1,4 +1,4 @@
-from src.core.novels.services.state import (
+from src.core.novels.services.generation.state import (
     PREVIOUS_LINES_LIMIT,
     PREVIOUS_SCENES_LIMIT,
     NovelState,

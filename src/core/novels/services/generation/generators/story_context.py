@@ -13,7 +13,7 @@ from src.core.novels.services.crud import (
     RoadmapService,
     SceneService,
 )
-from src.core.novels.services.generate.base import BaseGenerator
+from src.core.novels.services.generation.generators.base import BaseGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -256,10 +256,15 @@ class StoryContextGenerator(BaseGenerator):
                 """
             ),
         }
-        cast = "\n".join(f"- {c.name} ({c.role})" for c in characters)
+        cast = "\n".join(
+            f"- {c.name} ({c.role}{', протагонист' if c.is_protagonist else ''})"
+            for c in characters
+        )
         names = {c.id: c.name for c in characters}
         dialogue = "\n".join(
-            f"{names.get(line.character_id, '?')}: {line.text}" for line in lines
+            f"{names.get(line.character_id, '?')}"
+            f"{' (мысли)' if line.is_thought else ''}: {line.text}"
+            for line in lines
         )
         user_content = (
             f"Название истории: {novel.title}\n"

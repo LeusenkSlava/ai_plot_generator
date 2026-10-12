@@ -14,13 +14,13 @@ from src.core.novels.interfaces.repository import (
 )
 from src.core.novels.llm_trace import llm_trace
 from src.core.novels.models import Scene
-from src.core.novels.services.generate.dialogue import DialogueGenerator
-from src.core.novels.services.generate.scene import SceneGenerator
-from src.core.novels.services.generate.story_context import (
+from src.core.novels.services.generation.generators.dialogue import DialogueGenerator
+from src.core.novels.services.generation.generators.scene import SceneGenerator
+from src.core.novels.services.generation.generators.story_context import (
     StoryContextGenerator,
     render_story_context,
 )
-from src.core.novels.services.state import NextSceneSlot, NovelState
+from src.core.novels.services.generation.state import NextSceneSlot, NovelState
 
 logger = logging.getLogger(__name__)
 

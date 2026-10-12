@@ -11,7 +11,7 @@ from src.core.novels.services.crud import (
     RoadmapService,
     SceneService,
 )
-from src.core.novels.services.generate.dialogue import DialogueGenerator
+from src.core.novels.services.generation.generators.dialogue import DialogueGenerator
 from tests.factories import (
     background_domain,
     dialogue_line_domain,
@@ -659,3 +659,83 @@ class TestCodexErrors:
             await sut.generate(scene_id=world.scene.id)
 
         assert generator.not_called
+
+
+# ---------------------------------------------------------------------------
+# Главный герой (протагонист): без спрайта, доступны внутренние мысли
+# ---------------------------------------------------------------------------
+
+
+class TestProtagonist:
+    @pytest.fixture
+    def universe_id(self) -> int:
+        return 1
+
+    @pytest.fixture(autouse=True)
+    def _seed_codex(self, codex: FakeCodexService) -> None:
+        seed_codex(codex)
+
+    @pytest.fixture
+    async def protagonist_world(
+        self,
+        novel_repository: FakeNovelRepository,
+        roadmap_repository: FakeRoadmapRepository,
+        scene_repository: FakeSceneRepository,
+        character_repository: FakeCharacterRepository,
+    ) -> SimpleNamespace:
+        novel = await novel_repository.add(novel_domain(id=None, universe_id=1))
+        roadmap = await roadmap_repository.add(
+            roadmap_domain(id=None, novel_id=novel.id)
+        )
+        scene = await scene_repository.add(scene_domain(id=None, roadmap_id=roadmap.id))
+        alice = await character_repository.add(
+            novel_character_domain(
+                id=None, novel_id=novel.id, name="Алиса", role="Ведьма",
+                codex_character_id=ALICE_CODEX_ID, is_protagonist=True,
+            )
+        )
+        bob = await character_repository.add(
+            novel_character_domain(
+                id=None, novel_id=novel.id, name="Боб", role="Рыцарь",
+                codex_character_id=BOB_CODEX_ID,
+            )
+        )
+        return SimpleNamespace(
+            novel=novel, roadmap=roadmap, scene=scene, alice=alice, bob=bob
+        )
+
+    async def test_protagonist_has_no_sprite_assets(
+        self, sut, codex, protagonist_world
+    ):
+        result = await sut.generate(scene_id=protagonist_world.scene.id)
+
+        alice_line = result[0]
+        assert alice_line.character_id == protagonist_world.alice.id
+        assert alice_line.background_asset_key == "bg/forest.png"
+        assert alice_line.sprite_asset_key is None
+        assert alice_line.outfit_asset_key is None
+        assert alice_line.emotion_asset_key is None
+
+        # ассеты протагониста не загружаются из Codex
+        assert ("get_emotion_tags", ALICE_CODEX_ID) not in codex.calls
+        assert ("get_outfit_tags", ALICE_CODEX_ID) not in codex.calls
+        assert ("get_sprites", ALICE_CODEX_ID) not in codex.calls
+
+    async def test_protagonist_thought_preserved(self, sut, generator, protagonist_world):
+        generator.returns(
+            valid_dialogue_llm_payload(
+                dialogue_line_payload(
+                    character_name="Алиса", text="Я не должна бояться.",
+                    is_thought=True,
+                ),
+                dialogue_line_payload(
+                    character_name="Боб", text="Ты справишься.", is_thought=True,
+                ),
+            )
+        )
+
+        result = await sut.generate(scene_id=protagonist_world.scene.id)
+
+        assert result[0].is_thought is True
+        # is_thought значим только для протагониста — для остальных принудительно false
+        assert result[1].is_thought is False

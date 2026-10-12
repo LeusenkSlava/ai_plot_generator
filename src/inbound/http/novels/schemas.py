@@ -31,6 +31,7 @@ class CharacterResponse(BaseModel):
     id: int
     name: str
     role: str
+    is_protagonist: bool
 
 
 class DialogueLineResponse(BaseModel):
@@ -39,6 +40,7 @@ class DialogueLineResponse(BaseModel):
     order: int
     text: str
     is_final_for_scene: bool
+    is_thought: bool
     background_asset_key: str | None
     sprite_asset_key: str | None
     outfit_asset_key: str | None

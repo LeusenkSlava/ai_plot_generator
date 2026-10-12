@@ -14,6 +14,7 @@ def novel_character_domain(
     arc: str = "Найти пропавшего брата",
     voice_notes: str = "Говорит тихо",
     codex_character_id: int | None = None,
+    is_protagonist: bool = False,
 ) -> Character:
     return Character(
         id=id,
@@ -25,6 +26,7 @@ def novel_character_domain(
         arc=arc,
         voice_notes=voice_notes,
         codex_character_id=codex_character_id,
+        is_protagonist=is_protagonist,
     )
 
 
@@ -131,6 +133,7 @@ def dialogue_line_domain(
     order: int = 1,
     text: str = "Реплика",
     is_final_for_scene: bool = False,
+    is_thought: bool = False,
     background_asset_key: str | None = None,
     sprite_asset_key: str | None = None,
     outfit_asset_key: str | None = None,
@@ -146,6 +149,7 @@ def dialogue_line_domain(
         order=order,
         text=text,
         is_final_for_scene=is_final_for_scene,
+        is_thought=is_thought,
         background_asset_key=background_asset_key,
         sprite_asset_key=sprite_asset_key,
         outfit_asset_key=outfit_asset_key,

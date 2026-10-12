@@ -1,11 +1,13 @@
 import logging
 
+from src.core.codex.models import Background, CodexCharacter, Universe
 from src.core.codex.services import CodexService
 from src.core.novels.exceptions import GenerationError
 from src.core.novels.interfaces.generation import GeneratorProtocol
 from src.core.novels.models import Novel
 from src.core.novels.services.crud import NovelService
-from src.core.novels.services.generate.base import BaseGenerator
+from src.core.novels.services.generation.generators.base import BaseGenerator
+from src.core.novels.services.generation.prompts.context import render_all
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +28,8 @@ class NovelGenerator(BaseGenerator):
     async def generate(self, user_prompt: str, universe_id: int | None = None) -> Novel:
         codex_context = None
         if universe_id:
-            codex_context = await self.__codex_context(universe_id)
+            universe, characters, backgrounds = await self.__load_universe(universe_id)
+            codex_context = render_all(universe, characters, backgrounds)
 
         prompt = self.__create_prompt(user_prompt, codex_context)
         data = await self._generate(prompt, reasoning_effort=self._reasoning_effort)
@@ -35,30 +38,18 @@ class NovelGenerator(BaseGenerator):
         novel = await self._novel_service.add(novel)
         return novel
 
-    async def __codex_context(self, universe_id: int) -> str:
-        """Вселенная, персонажи и фоны из Codex"""
+    async def __load_universe(
+        self, universe_id: int
+    ) -> tuple[Universe, list[CodexCharacter], list[Background]]:
         try:
             universe = await self._codex_service.get_universe(universe_id)
             characters = await self._codex_service.get_characters(universe_id)
             backgrounds = await self._codex_service.get_backgrounds(universe_id)
         except Exception as e:
             raise GenerationError(f"Codex request failed: {e}") from e
-
         if universe is None:
             raise GenerationError(f"Universe with id {universe_id} not found in Codex")
-
-        parts = [f"Вселенная: {universe.title}\n{universe.description}"]
-        if characters:
-            parts.append(
-                "Персонажи (других нет):\n"
-                + "\n".join(f"- {c.name}: {c.description}" for c in characters)
-            )
-        if backgrounds:
-            parts.append(
-                "Локации (других нет):\n"
-                + "\n".join(f"- {b.description}" for b in backgrounds)
-            )
-        return "\n\n".join(parts)
+        return universe, characters, backgrounds
 
     def __create_prompt(
         self, user_prompt: str, codex_context: str | None = None

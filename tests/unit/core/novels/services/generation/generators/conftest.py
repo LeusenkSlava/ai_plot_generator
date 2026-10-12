@@ -1,6 +1,6 @@
 import pytest
 
-from src.core.novels.services.generate.novel import NovelGenerator
+from src.core.novels.services.generation.generators.novel import NovelGenerator
 from tests.factories import valid_novel_llm_payload
 from tests.fakes.core.novel.novel_service import FakeNovelService
 from tests.fakes.outbound.ai.generator import FakeGenerator

@@ -1,7 +1,7 @@
-from tests.unit.core.novels.services.generate.factories.llm import (
+from tests.unit.core.novels.services.generation.generators.factories.llm import (
     valid_novel_llm_payload,
 )
-from tests.unit.core.novels.services.generate.factories.universe import (
+from tests.unit.core.novels.services.generation.generators.factories.universe import (
     background_domain,
     character_domain,
     universe_domain,

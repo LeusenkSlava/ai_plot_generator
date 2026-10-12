@@ -44,12 +44,18 @@ src/
 
 ### Пайплайн генерации
 
-`core/novels/services/generate/` — по генератору на сущность, все наследуют `BaseGenerator` (оборачивает вызов LLM
-и превращает ошибки в `GenerationError`). Порядок: novel → characters → roadmap → scene → dialogue → story_context.
+`core/novels/services/` сгруппированы по роли:
 
-- `composition.py` (`NovelCompositionService`) — создаёт новеллу целиком до первой сцены с диалогом.
-- `continuation.py` (`SceneContinuationService`) — догенерирует следующую сцену по роадмапу.
-- `playback.py` (`NovelPlaybackService`) — пошаговая выдача реплик; **никогда не вызывает LLM**, только читает БД
+- `crud.py` — CRUD-фасады над репозиториями (`NovelService`, `CharacterService`, `SceneService`, ...).
+- `generation/` — всё про генерацию:
+  - `generators/` — по генератору на сущность, все наследуют `BaseGenerator` (оборачивает вызов LLM в `llm_step`
+    и превращает ошибки в `GenerationError`); порядок: novel → characters → roadmap → scene → dialogue → story_context;
+  - `composition.py` (`NovelCompositionService`) — создаёт новеллу целиком до первой сцены с диалогом;
+  - `continuation.py` (`SceneContinuationService`) — догенерирует следующую сцену по роадмапу;
+  - `state.py` (`NovelState`) — снапшот роадмапа/сцен/реплик и определение следующего слота;
+  - `assets.py` (`SceneAssetService`) — резолв спрайтов/фонов/одежды/эмоций из Codex;
+  - `prompts/` — чистые форматтеры промптов (текст, состав персонажей, контекст вселенной).
+- `playback/` (`NovelPlaybackService`) — пошаговая выдача реплик; **никогда не вызывает LLM**, только читает БД
   и возвращает статус `ok` / `need_generation` / `generating` / `finished`.
 - `story_context` — сжатое изложение прошедших сцен, передаётся в промпты следующих сцен/диалогов.
 - `use_cases/` — сценарии генерации новеллы и сцены (идемпотентность по `job_id`, сохранение результата/ошибки).

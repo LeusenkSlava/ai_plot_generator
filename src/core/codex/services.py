@@ -1,6 +1,8 @@
 from src.core.codex.interfaces import CodexClientProtocol
 from src.core.codex.models import (
     Background,
+    BackgroundMatchItem,
+    BackgroundTags,
     CodexCharacter,
     Emotion,
     EmotionMatchItem,
@@ -27,6 +29,19 @@ class CodexService:
 
     async def get_backgrounds(self, universe_id: int) -> list[Background]:
         return await self._client.get_backgrounds(universe_id)
+
+    async def get_background_tags(self, universe_id: int) -> BackgroundTags:
+        return await self._client.get_background_tags(universe_id)
+
+    async def match_background(
+        self, universe_id: int, tags: list[str]
+    ) -> Background | None:
+        return await self._client.match_background(universe_id, tags)
+
+    async def match_backgrounds_batch(
+        self, items: list[BackgroundMatchItem]
+    ) -> dict[int, Background | None]:
+        return await self._client.match_backgrounds_batch(items)
 
     async def get_sprites(self, character_id: int) -> list[Sprite]:
         return await self._client.get_sprites(character_id)

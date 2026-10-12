@@ -5,7 +5,7 @@ from contextlib import AbstractAsyncContextManager
 from src.core.generation_jobs.interfaces import GenerationJobRepositoryProtocol
 from src.core.generation_jobs.models import GenerationJob, GenerationJobStatus
 from src.core.novels.exceptions import GenerationError
-from src.core.novels.services.composition import NovelCompositionService
+from src.core.novels.services.generation.composition import NovelCompositionService
 
 logger = logging.getLogger(__name__)
 

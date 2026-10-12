@@ -16,7 +16,7 @@ from src.core.novels.interfaces.repository import (
     SceneRepositoryProtocol,
 )
 from src.core.novels.models import Character, DialogueLine, Scene
-from src.core.novels.services.state import resolve_next_slot
+from src.core.novels.services.generation.state import resolve_next_slot
 
 
 class PlaybackStatus(str, Enum):
