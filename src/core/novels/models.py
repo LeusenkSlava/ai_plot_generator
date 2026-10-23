@@ -1,5 +1,4 @@
-import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import ClassVar
 
@@ -34,6 +33,11 @@ class Roadmap:
     target_choice: bool
     choice_stakes: str | None
     scenes_count: int
+    # место и время действия шага. Задаются RoadmapGenerator из каталога локаций
+    # Codex и делают оси location/time у валидатора сцен осмысленными.
+    location_slug: str | None = None
+    time_of_day: str | None = None
+    day: int | None = None
 
 
 @dataclass
@@ -52,6 +56,18 @@ class Scene:
     # изложение истории после этой сцены: сюжетные факты и внешность/одежда персонажей.
     # Передаётся в генерацию следующей сцены и пересобирается после неё
     story_context: str | None = None
+    # явный список «кто в сцене» (id персонажей); формируется SceneGenerator по месту/времени
+    # шага и передаётся в DialogueGenerator вместо всего каста
+    character_ids: list[int] = field(default_factory=list)
+    # место и время действия сцены; наследуются от шага роадмапа, если LLM их не вернул.
+    # Нужны валидатору (сверка с шагом) и как якорь непрерывности для следующей сцены.
+    location_slug: str | None = None
+    time_of_day: str | None = None
+    day: int | None = None
+    # сцена не прошла смысловую проверку соответствия шагу роадмапа даже после
+    # ретраев — требует ручного вмешательства
+    needs_review: bool = False
+    review_reason: str | None = None
 
 
 @dataclass

@@ -19,6 +19,7 @@ from src.core.novels.services.generation.generators.scene import SceneGenerator
 from src.core.novels.services.generation.generators.story_context import (
     StoryContextGenerator,
     render_story_context,
+    render_story_summary,
 )
 from src.core.novels.services.generation.state import NextSceneSlot, NovelState
 
@@ -89,13 +90,18 @@ class SceneContinuationService:
 
     async def _run_pipeline(self, slot: NextSceneSlot, state: NovelState) -> Scene:
         story_text = render_story_context(state.last_story_context)
+        story_summary = render_story_summary(state.last_story_context)
 
         scene = await self._scene_generator.generate(
             slot.roadmap.id,
             previous_scenes=state.last_scenes,
             story_context=story_text,
+            story_summary=story_summary,
             order=slot.order,
         )
+
+        if scene.needs_review:
+            return scene
 
         await self._dialogue_generator.generate(
             scene.id,

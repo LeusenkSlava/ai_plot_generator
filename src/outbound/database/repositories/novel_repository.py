@@ -84,6 +84,9 @@ class RoadmapRepository:
             target_choice=roadmap.target_choice,
             choice_stakes=roadmap.choice_stakes,
             scenes_count=roadmap.scenes_count,
+            location_slug=roadmap.location_slug,
+            time_of_day=roadmap.time_of_day,
+            day=roadmap.day,
         )
         self._session.add(db_roadmap)
         await self._session.flush()
@@ -122,6 +125,9 @@ class RoadmapRepository:
             target_choice=db_roadmap.target_choice,
             choice_stakes=db_roadmap.choice_stakes,
             scenes_count=db_roadmap.scenes_count,
+            location_slug=db_roadmap.location_slug,
+            time_of_day=db_roadmap.time_of_day,
+            day=db_roadmap.day,
         )
 
 
@@ -138,6 +144,12 @@ class SceneRepository:
             is_final_for_roadmap=scene.is_final_for_roadmap,
             is_final_for_novel=scene.is_final_for_novel,
             story_context=scene.story_context,
+            character_ids=scene.character_ids,
+            location_slug=scene.location_slug,
+            time_of_day=scene.time_of_day,
+            day=scene.day,
+            needs_review=scene.needs_review,
+            review_reason=scene.review_reason,
         )
         self._session.add(db_scene)
         await self._session.flush()
@@ -192,6 +204,12 @@ class SceneRepository:
             is_final_for_roadmap=db_scene.is_final_for_roadmap,
             is_final_for_novel=db_scene.is_final_for_novel,
             story_context=db_scene.story_context,
+            character_ids=db_scene.character_ids or [],
+            location_slug=db_scene.location_slug,
+            time_of_day=db_scene.time_of_day,
+            day=db_scene.day,
+            needs_review=db_scene.needs_review,
+            review_reason=db_scene.review_reason,
         )
 
 

@@ -3,8 +3,6 @@ from dataclasses import dataclass
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.codex.services import CodexService
-from src.core.novels.services.generation.composition import NovelCompositionService
-from src.core.novels.services.generation.continuation import SceneContinuationService
 from src.core.novels.services.crud import (
     CharacterService,
     DialogueLineService,
@@ -12,6 +10,9 @@ from src.core.novels.services.crud import (
     RoadmapService,
     SceneService,
 )
+from src.core.novels.services.generation.assets import SceneAssetService
+from src.core.novels.services.generation.composition import NovelCompositionService
+from src.core.novels.services.generation.continuation import SceneContinuationService
 from src.core.novels.services.generation.generators import (
     CharacterGenerator,
     DialogueGenerator,
@@ -20,7 +21,9 @@ from src.core.novels.services.generation.generators import (
     SceneGenerator,
     StoryContextGenerator,
 )
-from src.core.novels.services.generation.assets import SceneAssetService
+from src.core.novels.services.generation.generators.scene_roadmap_validator import (
+    SceneRoadmapValidator,
+)
 from src.core.novels.use_cases import (
     GenerateNovelUseCase,
     GenerateSceneUseCase,
@@ -118,13 +121,16 @@ def build_novel_generators(
             codex_service=codex_service,
             generator=generator,
             reasoning_effort=settings.deepseek.CHARACTER_REASONING_EFFORT,
+            think=settings.deepseek.CHARACTER_THINK,
         ),
         roadmap=RoadmapGenerator(
             novel_service=services.novel,
             roadmap_service=services.roadmap,
             character_service=services.character,
+            codex_service=codex_service,
             generator=generator,
             reasoning_effort=settings.deepseek.ROADMAP_REASONING_EFFORT,
+            think=settings.deepseek.ROADMAP_THINK,
         ),
         scene=SceneGenerator(
             novel_service=services.novel,
@@ -132,6 +138,8 @@ def build_novel_generators(
             scene_service=services.scene,
             character_service=services.character,
             generator=generator,
+            validator=SceneRoadmapValidator(generator=generator),
+            max_validation_retries=settings.deepseek.SCENE_VALIDATION_RETRIES,
         ),
         dialogue=DialogueGenerator(
             novel_service=services.novel,

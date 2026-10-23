@@ -1,20 +1,61 @@
-"""Публикация событий использования LLM в Kafka для отдельного сервиса аналитики.
+"""Публикация событий использования LLM в Kafka для сервиса аналитики.
 
-Адаптер протокола LLMUsagePublisher: отправляет сообщение fire-and-forget
-(без ожидания подтверждения), а любые ошибки доставки только логирует —
-аналитика не должна влиять на генерацию.
+Единый адаптер доставки (``AnalyticsSink``): неблокирующе ставит события во
+внутреннюю очередь, фоновый воркер отправляет их в Kafka с подтверждением
+(``send_and_wait``) и ретраями. При недоступном брокере события уходят в
+локальный outbox (``Spool``) и досылаются при следующем дренаже — аналитика
+не влияет на генерацию и не теряет данные.
 
-Событие строго соответствует схеме ClickHouse ``analytics.llm_calls``: лишние
-поля не отправляются, чтобы JSONEachRow-потребитель не отбрасывал сообщения.
+Событие соответствует схеме ClickHouse ``analytics.llm_calls``: помимо метрик
+(токены/латентность/ошибка) передаются ``event_id`` (дедуп-ключ), ``scene_order``
+и, для «контентных» шагов, ``response`` (сырой JSON ответа LLM). Промпты
+(``messages``) в аналитику не отправляются.
 """
 
 import asyncio
 import json
 import logging
+import uuid
 
 from aiokafka import AIOKafkaProducer
 
+from src.outbound.analytics.spool import Spool
+
 logger = logging.getLogger(__name__)
+
+# Шаги, чьи ответы (response) нужны для разбора сюжета и багов.
+RESPONSE_STEPS_DEFAULT = frozenset(
+    {
+        "RoadmapGenerator",
+        "SceneGenerator",
+        "DialogueGenerator",
+        "StoryContextGenerator",
+        "SceneRoadmapValidator",
+    }
+)
+
+
+def _to_int(value) -> int:
+    """Безопасное приведение к int: нечисловые значения (в т.ч. MagicMock-строки
+    из тестовых записей) дают 0, а не падение."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _scene_order(operation: str | None) -> int:
+    """create_novel → 0, scene_N → N (прочее → 0)."""
+    if not operation:
+        return 0
+    if operation == "create_novel":
+        return 0
+    if operation.startswith("scene_"):
+        try:
+            return int(operation.removeprefix("scene_"))
+        except ValueError:
+            return 0
+    return 0
 
 
 def build_usage_event(
@@ -22,66 +63,146 @@ def build_usage_event(
     *,
     entity_id: int | None,
     service: str,
+    response_steps: frozenset | set | None = None,
 ) -> dict:
     """Собирает событие аналитики в формате analytics.llm_calls.
 
     Маппинг записи llm_log на колонки ClickHouse:
-      - ``service``          <- идентификатор сервиса (app.SERVICE_ID)
-      - ``cached_tokens``    <- cache_hit_tokens (токены, попавшие в кэш)
-      - ``duration_ms``      <- duration_s * 1000
-      - ``llm_requests``     <- 1 на вызов, ``tool_calls`` <- 0
-      - ``job_id``           <- пока пусто (job_id можно протянуть в trace позже)
+      - ``event_id``        <- uuid вызова (дедуп-ключ, генерится в llm_log)
+      - ``scene_order``     <- 0 для create_novel, N для scene_N
+      - ``cached_tokens``   <- cache_hit_tokens (токены, попавшие в кэш)
+      - ``duration_ms``     <- duration_s * 1000
+      - ``response``        <- текст ответа только для контентных шагов
     """
+    allowed = response_steps if response_steps is not None else RESPONSE_STEPS_DEFAULT
+    step = record.get("step") or ""
+    operation = record.get("operation") or ""
     duration_s = record.get("duration_s") or 0
+
     return {
+        "event_id": record.get("event_id") or uuid.uuid4().hex,
         "ts": record.get("ts"),
         "service": service,
-        "operation": record.get("operation") or "",
-        "step": record.get("step") or "",
+        "operation": operation,
+        "step": step,
+        "scene_order": _scene_order(operation),
         "model": record.get("model") or "",
         "entity_id": str(entity_id) if entity_id is not None else "",
         "job_id": str(record.get("job_id") or ""),
-        "prompt_tokens": int(record.get("prompt_tokens") or 0),
-        "completion_tokens": int(record.get("completion_tokens") or 0),
-        "cached_tokens": int(record.get("cache_hit_tokens") or 0),
+        "prompt_tokens": _to_int(record.get("prompt_tokens")),
+        "completion_tokens": _to_int(record.get("completion_tokens")),
+        "reasoning_tokens": _to_int(record.get("reasoning_tokens")),
+        "cached_tokens": _to_int(record.get("cache_hit_tokens")),
         "duration_ms": int(round(duration_s * 1000)),
         "llm_requests": 1,
         "tool_calls": 0,
         "error": record.get("error") or "",
+        "response": (record.get("response") or "") if step in allowed else "",
     }
 
 
-class KafkaLLMUsagePublisher:
-    """Отправляет события использования LLM в Kafka без ожидания ответа."""
+class AnalyticsSink:
+    """Отправляет события использования LLM в Kafka, с локальным outbox-фолбэком."""
 
-    def __init__(self, producer: AIOKafkaProducer, topic: str, service: str):
+    def __init__(
+        self,
+        producer: AIOKafkaProducer,
+        topic: str,
+        service: str,
+        *,
+        spool: Spool,
+        response_steps: frozenset | set | None = None,
+        flush_interval_s: float = 1.0,
+        max_retries: int = 3,
+        retry_backoff_s: float = 0.5,
+        queue_size: int = 10000,
+    ):
         self._producer = producer
         self._topic = topic
         self._service = service
-        self._tasks: set[asyncio.Task] = set()
+        self._spool = spool
+        self._response_steps = (
+            response_steps if response_steps is not None else RESPONSE_STEPS_DEFAULT
+        )
+        self._flush_interval_s = flush_interval_s
+        self._max_retries = max_retries
+        self._retry_backoff_s = retry_backoff_s
+        self._queue: asyncio.Queue = asyncio.Queue(maxsize=queue_size)
+        self._task: asyncio.Task | None = None
+        self._stop = asyncio.Event()
+
+    # -- Протокол LLMUsagePublisher --------------------------------------
 
     def publish(self, record: dict, entity_id: int | None) -> None:
-        """Планирует отправку события в текущем event loop, не дожидаясь результата."""
-        event = build_usage_event(record, entity_id=entity_id, service=self._service)
+        """Неблокирующе ставит событие в очередь; при переполнении — в outbox."""
+        event = build_usage_event(
+            record,
+            entity_id=entity_id,
+            service=self._service,
+            response_steps=self._response_steps,
+        )
         try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            logger.error("usage_publisher: нет запущенного event loop — событие пропущено")
-            return
-        task = loop.create_task(self._send(event))
-        self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
+            self._queue.put_nowait(event)
+        except asyncio.QueueFull:
+            self._spool.append(event)
 
     async def flush(self) -> None:
-        """Дожидается отправки всех запланированных событий (перед остановкой продюсера)."""
-        if self._tasks:
-            await asyncio.gather(*list(self._tasks), return_exceptions=True)
+        """Дожимает очередь и outbox (вызывается перед остановкой)."""
+        await self._drain_queue()
+        await self._drain_spool()
 
-    async def _send(self, event: dict) -> None:
-        try:
-            await self._producer.send(
-                self._topic,
-                json.dumps(event, ensure_ascii=False, default=str).encode(),
-            )
-        except Exception as exc:  # аналитика не должна ломать генерацию
-            logger.error("usage_publisher: не удалось отправить событие: %s", exc)
+    # -- Жизненный цикл фонового воркера ---------------------------------
+
+    async def start(self) -> None:
+        self._task = asyncio.create_task(self._run(), name="analytics-sink")
+
+    async def stop(self) -> None:
+        self._stop.set()
+        if self._task is not None:
+            await self._task
+            self._task = None
+
+    async def _run(self) -> None:
+        while not self._stop.is_set():
+            await self._drain_queue()
+            await self._drain_spool()
+            try:
+                await asyncio.wait_for(self._stop.wait(), timeout=self._flush_interval_s)
+            except asyncio.TimeoutError:
+                pass
+
+    async def _drain_queue(self) -> None:
+        while True:
+            try:
+                event = self._queue.get_nowait()
+            except asyncio.QueueEmpty:
+                return
+            if not await self._send_with_retry(event):
+                self._spool.append(event)
+
+    async def _drain_spool(self) -> None:
+        pending = self._spool.read()
+        if not pending:
+            return
+        failed = []
+        for event in pending:
+            if not await self._send_with_retry(event):
+                failed.append(event)
+        self._spool.rewrite(failed)
+
+    async def _send_with_retry(self, event: dict) -> bool:
+        payload = json.dumps(event, ensure_ascii=False, default=str).encode()
+        for attempt in range(1, self._max_retries + 1):
+            try:
+                await self._producer.send_and_wait(self._topic, payload)
+                return True
+            except Exception as exc:
+                logger.error(
+                    "analytics sink: не удалось отправить событие (попытка %s/%s): %s",
+                    attempt,
+                    self._max_retries,
+                    exc,
+                )
+                if attempt < self._max_retries:
+                    await asyncio.sleep(self._retry_backoff_s)
+        return False

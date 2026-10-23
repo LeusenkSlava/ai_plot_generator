@@ -54,6 +54,9 @@ class SceneResponse(BaseModel):
     order: int
     is_final_for_roadmap: bool
     is_final_for_novel: bool
+    location_slug: str | None = None
+    time_of_day: str | None = None
+    day: int | None = None
 
 
 class DialogueStepResponse(BaseModel):

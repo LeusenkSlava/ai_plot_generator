@@ -39,8 +39,17 @@ class DeepSeekSettings(BaseSettings):
 
     NOVEL_REASONING_EFFORT: str = "high"
     CHARACTER_REASONING_EFFORT: str = "low"
-    ROADMAP_REASONING_EFFORT: str = "high"
-    DIALOGUE_REASONING_EFFORT: str = "high"
+    ROADMAP_REASONING_EFFORT: str = "low"
+    DIALOGUE_REASONING_EFFORT: str = "low"
+
+    # Тумблеры thinking mode (deepseek). False = thinking выключен, reasoning
+    # не генерируется и не тарифицируется. На структурированных JSON-шагах
+    # (персонажи, роадмап) мышление почти не даёт прироста качества, но жжёт
+    # ~40-50% выходных токенов.
+    CHARACTER_THINK: bool = False
+    ROADMAP_THINK: bool = True
+
+    SCENE_VALIDATION_RETRIES: int = 3
 
 
 class CodexSettings(BaseSettings):
@@ -55,10 +64,31 @@ class KafkaSettings(BaseSettings):
 
 
 class AnalyticsSettings(BaseSettings):
-    """Настройки отдельного сервиса аналитики использования LLM."""
+    """Настройки отправки событий использования LLM в сервис аналитики."""
 
     # Топик, в который публикуются события (env: ANALYTICS__KAFKA_TOPIC)
     KAFKA_TOPIC: str = Topics.LLM_USAGE
+
+    # Локальный outbox на случай недоступности Kafka: события дописываются в файл
+    # и досылаются при следующем дренаже. (env: ANALYTICS__SPOOL_DIR / SPOOL_FILE)
+    SPOOL_DIR: str = "llm_logs"
+    SPOOL_FILE: str = "outbox.jsonl"
+
+    # Шаги, чьи ответы (response) публикуются в аналитику для разбора сюжета/багов.
+    # Остальные шаги шлют только метрики, без текста ответа.
+    RESPONSE_STEPS: list[str] = [
+        "RoadmapGenerator",
+        "SceneGenerator",
+        "DialogueGenerator",
+        "StoryContextGenerator",
+        "SceneRoadmapValidator",
+    ]
+
+    # Период дренажа очереди/outbox (сек) и параметры ретрая отправки.
+    FLUSH_INTERVAL_S: float = 1.0
+    MAX_RETRIES: int = 3
+    RETRY_BACKOFF_S: float = 0.5
+    QUEUE_SIZE: int = 10000
 
 
 class Settings(BaseSettings):

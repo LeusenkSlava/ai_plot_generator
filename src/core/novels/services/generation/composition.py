@@ -41,10 +41,14 @@ class NovelCompositionService:
             await self._character_generator.generate(novel.id)
             roadmap = await self._roadmap_generator.generate(novel.id)
 
-            first_step = roadmap[0]
-            scene = await self._scene_generator.generate(first_step.id)
-            await self._dialogue_generator.generate(scene.id)
-            # Для первой сцены изложения ещё нет — собираем его только из её диалога
-            await self._story_context_generator.generate(scene.id)
+            # Первая сцена — отдельный признак, не разовая настройка.
+            with llm_trace("scene_1", novel_id=novel.id):
+                first_step = roadmap[0]
+                scene = await self._scene_generator.generate(first_step.id)
+                if scene.needs_review:
+                    return novel
+                await self._dialogue_generator.generate(scene.id)
+                # Для первой сцены изложения ещё нет — собираем его только из её диалога
+                await self._story_context_generator.generate(scene.id)
 
             return novel

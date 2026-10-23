@@ -1,6 +1,7 @@
 from src.core.codex.exceptions import CodexUnavailableError
 from src.core.codex.models import (
     Background,
+    BackgroundTags,
     CodexCharacter,
     Emotion,
     EmotionTags,
@@ -23,6 +24,7 @@ class FakeCodexService:
         self._universes: dict[int, Universe] = {}
         self._characters: dict[int, list[CodexCharacter]] = {}
         self._backgrounds: dict[int, list[Background]] = {}
+        self._background_tags: dict[int, BackgroundTags] = {}
 
         self._sprites: dict[int, list[Sprite]] = {}
         self._emotion_tags: dict[int, EmotionTags] = {}
@@ -46,6 +48,11 @@ class FakeCodexService:
 
     def add_backgrounds(self, universe_id: int, backgrounds: list[Background]) -> None:
         self._backgrounds[universe_id] = list(backgrounds)
+
+    def add_background_tags(
+        self, universe_id: int, tags: BackgroundTags
+    ) -> None:
+        self._background_tags[universe_id] = tags
 
     def add_sprites(self, character_id: int, sprites: list[Sprite]) -> None:
         self._sprites[character_id] = list(sprites)
@@ -81,6 +88,7 @@ class FakeCodexService:
         """Сбросить данные (полезно в тестах на пустые персонажи/локации)."""
         self._characters.clear()
         self._backgrounds.clear()
+        self._background_tags.clear()
         self._sprites.clear()
         self._emotion_tags.clear()
         self._outfit_tags.clear()
@@ -107,6 +115,24 @@ class FakeCodexService:
         if "get_backgrounds" in self._raise_on:
             raise RuntimeError("codex down")
         return list(self._backgrounds.get(universe_id, []))
+
+    async def get_background_tags(self, universe_id: int) -> BackgroundTags:
+        self.calls.append(("get_background_tags", universe_id))
+        if "get_background_tags" in self._raise_on:
+            raise RuntimeError("codex down")
+        return self._background_tags.get(universe_id, BackgroundTags())
+
+    async def match_background(
+        self, universe_id: int, tags: list[str]
+    ) -> Background | None:
+        """Подбор задника по slug в тегах (как реальный CodexService)."""
+        self.calls.append(("match_background", universe_id, list(tags)))
+        if "match_background" in self._raise_on:
+            raise CodexUnavailableError("codex down")
+        for background in self._backgrounds.get(universe_id, []):
+            if background.slug in tags:
+                return background
+        return None
 
     async def get_sprites(self, character_id: int) -> list[Sprite]:
         self.calls.append(("get_sprites", character_id))

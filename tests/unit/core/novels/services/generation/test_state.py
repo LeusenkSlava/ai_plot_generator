@@ -2,6 +2,7 @@ from src.core.novels.services.generation.state import (
     PREVIOUS_LINES_LIMIT,
     PREVIOUS_SCENES_LIMIT,
     NovelState,
+    is_step_closed,
     resolve_next_slot,
 )
 from tests.factories import dialogue_line_domain, roadmap_domain, scene_domain
@@ -74,6 +75,65 @@ class TestResolveNextSlot:
         assert slot is not None
         assert slot.roadmap.id == 10
 
+    def test_needs_review_scene_does_not_close_step(self):
+        """Сцена, не прошедшая валидацию (needs_review), не закрывает шаг."""
+        roadmaps = [roadmap_domain(id=10, scenes_count=2)]
+        scenes = [
+            scene_domain(id=1, roadmap_id=10, order=1),
+            scene_domain(id=2, roadmap_id=10, order=2, needs_review=True),
+        ]
+
+        slot = resolve_next_slot(roadmaps, scenes)
+
+        # Одна валидная сцена из двух — шаг не закрыт, следующая сцена этого шага.
+        assert slot is not None
+        assert slot.roadmap.id == 10
+        assert slot.order == 3
+
+
+# ---------------------------------------------------------------------------
+# is_step_closed — явный признак закрытия шага
+# ---------------------------------------------------------------------------
+
+
+class TestIsStepClosed:
+    def test_closed_when_valid_scenes_reach_scenes_count(self):
+        roadmap = roadmap_domain(id=10, scenes_count=2)
+        scenes = [
+            scene_domain(roadmap_id=10, order=1),
+            scene_domain(roadmap_id=10, order=2),
+        ]
+
+        assert is_step_closed(roadmap, scenes) is True
+
+    def test_not_closed_with_one_scene_for_two_scene_step(self):
+        """Шаг из 2 сцен не может быть закрыт одной сценой."""
+        roadmap = roadmap_domain(id=10, scenes_count=2)
+        scenes = [scene_domain(roadmap_id=10, order=1)]
+
+        assert is_step_closed(roadmap, scenes) is False
+
+    def test_needs_review_scene_does_not_close_step(self):
+        roadmap = roadmap_domain(id=10, scenes_count=2)
+        scenes = [
+            scene_domain(roadmap_id=10, order=1),
+            scene_domain(roadmap_id=10, order=2, needs_review=True),
+        ]
+
+        assert is_step_closed(roadmap, scenes) is False
+
+    def test_scenes_count_zero_treated_as_one(self):
+        roadmap = roadmap_domain(id=10, scenes_count=0)
+
+        assert is_step_closed(roadmap, []) is False
+        assert is_step_closed(roadmap, [scene_domain(roadmap_id=10)]) is True
+
+    def test_scenes_of_other_roadmaps_ignored(self):
+        roadmap = roadmap_domain(id=10, scenes_count=1)
+        scenes = [scene_domain(roadmap_id=99, order=1)]
+
+        assert is_step_closed(roadmap, scenes) is False
+
 
 # ---------------------------------------------------------------------------
 # NovelState — снапшот состояния новеллы
@@ -99,6 +159,18 @@ class TestNovelState:
 
         assert len(state.last_scenes) == PREVIOUS_SCENES_LIMIT
         assert [s.order for s in state.last_scenes] == [3, 4, 5, 6, 7]
+
+    def test_last_scenes_excludes_needs_review(self):
+        """Сцены с needs_review не попадают в контекст следующих генераций."""
+        scenes = [
+            scene_domain(id=1, order=1),
+            scene_domain(id=2, order=2, needs_review=True),
+            scene_domain(id=3, order=3),
+        ]
+
+        state = NovelState([], scenes, [])
+
+        assert [s.id for s in state.last_scenes] == [1, 3]
 
     def test_scene_at_returns_scene_by_order(self):
         scenes = [scene_domain(id=1, order=2), scene_domain(id=2, order=1)]

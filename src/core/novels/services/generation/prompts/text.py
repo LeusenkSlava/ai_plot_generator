@@ -9,3 +9,14 @@ def single_line(text: str) -> str:
     поэтому переносы заменяем на пробелы.
     """
     return " ".join(text.split())
+
+
+def parse_day(value) -> int | None:
+    """Парсит номер дня истории (целое, >= 1); None, если не задан или некорректен."""
+    if value is None:
+        return None
+    try:
+        day = int(value)
+    except (TypeError, ValueError):
+        return None
+    return day if day >= 1 else None

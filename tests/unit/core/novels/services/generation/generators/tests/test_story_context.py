@@ -1,7 +1,14 @@
+import pytest
+
+from src.core.novels.models import Novel, Scene
 from src.core.novels.services.generation.generators.story_context import (
     MAX_KEY_FACTS,
     MAX_USED_PHRASES,
+    StoryContextGenerator,
     StoryState,
+    _cast_name_tokens,
+    _filter_used_phrases,
+    _valid_used_phrase,
 )
 
 
@@ -56,6 +63,113 @@ class TestStoryStateApply:
         # Самый старый факт уходит первым
         assert state.key_facts[0] == "Факт 1"
         assert state.key_facts[-1] == "Новый факт"
+
+
+class TestStoryStateFreshFactProtection:
+    def test_fresh_fact_not_removed_next_iteration(self):
+        """Только что добавленный факт не удаляется на следующей итерации."""
+        state = StoryState()
+        state.apply({"add_facts": ["Семён проспал линейку"]})
+
+        protected = state.apply({"remove_facts": [1]})
+
+        assert state.key_facts == ["Семён проспал линейку"]
+        assert protected == [(1, "Семён проспал линейку")]
+
+    def test_fact_removable_only_after_min_age(self):
+        """Факт можно удалить только после MIN_FACT_AGE_TO_REMOVE итераций."""
+        state = StoryState()
+        state.apply({"add_facts": ["Факт"]})
+
+        # возраст 0 — защищён
+        assert state.apply({"remove_facts": [1]}) == [(1, "Факт")]
+        # возраст 1 — защищён
+        assert state.apply({"remove_facts": [1]}) == [(1, "Факт")]
+        assert state.key_facts == ["Факт"]
+        # возраст 2 — удаляем
+        assert state.apply({"remove_facts": [1]}) == []
+        assert state.key_facts == []
+
+    def test_old_fact_removed_normally(self):
+        """Факт без возраста (legacy/прямая конструкция) считается взрослым и удаляется."""
+        state = StoryState(key_facts=["старый факт"])
+
+        assert state.apply({"remove_facts": [1]}) == []
+        assert state.key_facts == []
+
+    def test_ages_survive_dump_roundtrip(self):
+        """Возраста фактов сохраняются в JSON и защита работает между сценами."""
+        state = StoryState()
+        state.apply({"add_facts": ["Факт"]})
+
+        loaded = StoryState.load(state.dump())
+
+        assert loaded.fact_ages == [0]
+        assert loaded.apply({"remove_facts": [1]}) == [(1, "Факт")]
+
+
+class TestUsedPhrasesValidation:
+    def test_single_word_rejected(self):
+        tokens = _cast_name_tokens(["Семён", "Виола"])
+
+        assert _valid_used_phrase("наверное", tokens) is False
+        assert _valid_used_phrase("пионер", tokens) is False
+
+    def test_two_or_more_words_accepted(self):
+        tokens = _cast_name_tokens(["Семён", "Виола"])
+
+        assert _valid_used_phrase("не ходи туда", tokens) is True
+
+    def test_phrase_with_cast_name_rejected(self):
+        tokens = _cast_name_tokens(["Семён", "Ольга Дмитриевна"])
+
+        assert _valid_used_phrase("Ольга Дмитриевна", tokens) is False
+        assert _valid_used_phrase("Ульяна не глупая", _cast_name_tokens(["Ульяна"])) is False
+
+    def test_filter_drops_invalid(self):
+        tokens = _cast_name_tokens(["Семён", "Виола", "Ольга Дмитриевна"])
+
+        result = _filter_used_phrases(
+            ["наверное", "не ходи туда", "Ольга Дмитриевна"], tokens
+        )
+
+        assert result == ["не ходи туда"]
+
+    def test_cast_name_tokens_split_multiword(self):
+        tokens = _cast_name_tokens(["Ольга Дмитриевна"])
+
+        assert tokens == {"ольга", "дмитриевна"}
+
+
+class TestUsedPhrasesLimit:
+    def test_limit_is_five(self):
+        assert MAX_USED_PHRASES == 5
+
+    def test_prompt_uses_constant(self):
+        novel = Novel(
+            id=1,
+            created_at=None,
+            updated_at=None,
+            title="Т",
+            public_description="",
+            description="D",
+            tone="tone",
+        )
+        scene = Scene(
+            id=1,
+            created_at=None,
+            updated_at=None,
+            roadmap_id=1,
+            title="Сцена",
+            description="Описание",
+            order=1,
+        )
+        gen = StoryContextGenerator.__new__(StoryContextGenerator)
+        prompt = gen._StoryContextGenerator__create_prompt(
+            novel, scene, [], [], StoryState()
+        )
+
+        assert f"до {MAX_USED_PHRASES} фраз-мотивов" in prompt[0]["content"]
 
 
 class TestStoryStateUsedPhrases:

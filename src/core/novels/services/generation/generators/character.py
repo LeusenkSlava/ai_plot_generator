@@ -20,12 +20,14 @@ class CharacterGenerator(BaseGenerator):
         codex_service: CodexService,
         generator: GeneratorProtocol,
         reasoning_effort: str | None = None,
+        think: bool = True,
     ):
         super().__init__(generator)
         self._novel_service = novel_service
         self._character_service = character_service
         self._codex_service = codex_service
         self._reasoning_effort = reasoning_effort
+        self._think = think
 
     async def generate(self, novel_id: int) -> list[Character]:
         novel = await self._novel_service.get(novel_id)
@@ -44,7 +46,9 @@ class CharacterGenerator(BaseGenerator):
         codex_by_slug = {c.slug: c for c in codex_characters}
 
         prompt = self.__create_prompt(novel, codex_characters)
-        data = await self._generate(prompt, reasoning_effort=self._reasoning_effort)
+        data = await self._generate(
+            prompt, think=self._think, reasoning_effort=self._reasoning_effort
+        )
 
         characters_data = data.get("characters")
         if not characters_data:

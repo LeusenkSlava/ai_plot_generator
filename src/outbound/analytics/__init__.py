@@ -1,11 +1,13 @@
-from src.outbound.analytics.backfill import backfill_usage_logs
+from src.outbound.analytics.spool import Spool
 from src.outbound.analytics.usage_publisher import (
-    KafkaLLMUsagePublisher,
+    RESPONSE_STEPS_DEFAULT,
+    AnalyticsSink,
     build_usage_event,
 )
 
 __all__ = (
-    "KafkaLLMUsagePublisher",
-    "backfill_usage_logs",
+    "AnalyticsSink",
+    "Spool",
+    "RESPONSE_STEPS_DEFAULT",
     "build_usage_event",
 )

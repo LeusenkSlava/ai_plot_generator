@@ -80,6 +80,9 @@ def roadmap_domain(
     target_choice: bool = False,
     choice_stakes: str | None = None,
     scenes_count: int = 2,
+    location_slug: str | None = None,
+    time_of_day: str | None = None,
+    day: int | None = None,
 ) -> Roadmap:
     return Roadmap(
         id=id,
@@ -92,6 +95,9 @@ def roadmap_domain(
         target_choice=target_choice,
         choice_stakes=choice_stakes,
         scenes_count=scenes_count,
+        location_slug=location_slug,
+        time_of_day=time_of_day,
+        day=day,
     )
 
 
@@ -107,6 +113,12 @@ def scene_domain(
     is_final_for_roadmap: bool = False,
     is_final_for_novel: bool = False,
     story_context: str | None = None,
+    character_ids: list[int] | None = None,
+    location_slug: str | None = None,
+    time_of_day: str | None = None,
+    day: int | None = None,
+    needs_review: bool = False,
+    review_reason: str | None = None,
 ) -> Scene:
     return Scene(
         id=id,
@@ -119,6 +131,12 @@ def scene_domain(
         is_final_for_roadmap=is_final_for_roadmap,
         is_final_for_novel=is_final_for_novel,
         story_context=story_context,
+        character_ids=character_ids if character_ids is not None else [],
+        location_slug=location_slug,
+        time_of_day=time_of_day,
+        day=day,
+        needs_review=needs_review,
+        review_reason=review_reason,
     )
 
 
@@ -164,7 +182,8 @@ def dialogue_line_payload(
     **asset_fields,
 ) -> dict:
     """Одна реплика в ответе LLM. asset_fields — необязательные
-    background_slug/sprite_slug/outfit_tag/emotion_base_tag/emotion_modifier_tags."""
+    background_base_tag/background_modifier_tags/sprite_slug/outfit_tag/
+    emotion_base_tag/emotion_modifier_tags."""
     return {"character_name": character_name, "text": text, **asset_fields}
 
 

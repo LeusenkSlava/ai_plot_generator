@@ -1,4 +1,5 @@
 from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.outbound.database.models.base_model import BaseModel
@@ -43,6 +44,9 @@ class RoadmapModel(BaseModel):
     target_choice: Mapped[bool] = mapped_column(Boolean)
     choice_stakes: Mapped[str | None] = mapped_column(String)
     scenes_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    location_slug: Mapped[str | None] = mapped_column(String, nullable=True)
+    time_of_day: Mapped[str | None] = mapped_column(String, nullable=True)
+    day: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     novel: Mapped["NovelModel"] = relationship("NovelModel", back_populates="roadmap")
 
@@ -98,6 +102,15 @@ class SceneModel(BaseModel):
         Boolean, nullable=False, default=False
     )
     story_context: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Типизированный список id персонажей, присутствующих в сцене
+    character_ids: Mapped[list[int] | None] = mapped_column(ARRAY(Integer), nullable=True)
+    location_slug: Mapped[str | None] = mapped_column(String, nullable=True)
+    time_of_day: Mapped[str | None] = mapped_column(String, nullable=True)
+    day: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    needs_review: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    review_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     roadmap: Mapped["RoadmapModel"] = relationship(
         "RoadmapModel", back_populates="scenes"

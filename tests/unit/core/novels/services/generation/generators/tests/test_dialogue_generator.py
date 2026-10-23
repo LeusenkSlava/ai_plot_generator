@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.core.codex.models import EmotionTags, Tag, TagType
+from src.core.codex.models import BackgroundTags, EmotionTags, Tag, TagType
 from src.core.novels.exceptions import GenerationError
 from src.core.novels.services.crud import (
     CharacterService,
@@ -11,6 +11,7 @@ from src.core.novels.services.crud import (
     RoadmapService,
     SceneService,
 )
+from src.core.novels.services.generation.assets import SceneAssetService
 from src.core.novels.services.generation.generators.dialogue import DialogueGenerator
 from tests.factories import (
     background_domain,
@@ -70,6 +71,13 @@ def seed_codex(codex: FakeCodexService) -> None:
                 asset_key="bg/forest.png",
             )
         ],
+    )
+    codex.add_background_tags(
+        1,
+        BackgroundTags(
+            base=[Tag(id=6, type=TagType.LOCATION, slug="forest", name="Лес")],
+            modifiers=[Tag(id=7, type=TagType.TIME_OF_DAY, slug="day", name="День")],
+        ),
     )
 
     codex.add_emotion_tags(ALICE_CODEX_ID, EmotionTags(base=[angry], modifiers=[soft]))
@@ -149,7 +157,8 @@ def _default_payload() -> dict:
         dialogue_line_payload(
             character_name="Алиса",
             text="Я найду брата!",
-            background_slug="forest",
+            background_base_tag="forest",
+            background_modifier_tags=[],
             sprite_slug="alice-base",
             emotion_base_tag="angry",
             emotion_modifier_tags=["soft"],
@@ -158,7 +167,8 @@ def _default_payload() -> dict:
         dialogue_line_payload(
             character_name="Боб",
             text="Я пойду с тобой.",
-            background_slug="forest",
+            background_base_tag="forest",
+            background_modifier_tags=[],
             sprite_slug="bob-armor",
             emotion_base_tag="calm",
             emotion_modifier_tags=[],
@@ -250,7 +260,7 @@ def sut(
         roadmap_service=roadmap_service,
         character_service=character_service,
         dialogue_line_service=dialogue_line_service,
-        codex_service=codex,
+        scene_assets=SceneAssetService(codex),
         generator=generator,
     )
 
@@ -337,8 +347,10 @@ class TestGenerateWithoutUniverse:
 
         generator.assert_system_contains("сценарист интерактивных визуальных новелл")
         user_prompt = generator.last_user_prompt
+        assert "Персонажи новеллы:" in user_prompt
         assert "Алиса" in user_prompt
         assert "Боб" in user_prompt
+        assert "Участники сцены:" in user_prompt
         assert world.scene.title in user_prompt
         assert world.scene.description in user_prompt
 
@@ -347,12 +359,47 @@ class TestGenerateWithoutUniverse:
 
         user_prompt = generator.last_user_prompt
         assert "Каталог ассетов" not in user_prompt
-        assert "Фоны (background_slug)" not in user_prompt
+        assert "Фоны (background_base_tag" not in user_prompt
 
     async def test_llm_called_exactly_once(self, sut, generator, world):
         await sut.generate(scene_id=world.scene.id)
 
         assert generator.call_count == 1
+
+    async def test_prompt_forbids_moral_endings(self, sut, generator, world):
+        await sut.generate(scene_id=world.scene.id)
+
+        generator.assert_system_contains(
+            "мыслью-выводом",
+            "финальная реплика сцены",
+        )
+
+    async def test_full_cast_in_head_participants_separate(
+        self, sut, generator, world, scene_repository
+    ):
+        """Полный каст всегда в голове промпта, участники сцены — отдельным блоком."""
+        scene = await scene_repository.add(
+            scene_domain(
+                id=None,
+                roadmap_id=world.roadmap.id,
+                character_ids=[world.alice.id],
+            )
+        )
+        # В сцене только Алиса — реплики только за неё, иначе проверка каста упадёт.
+        generator.returns(
+            valid_dialogue_llm_payload(
+                dialogue_line_payload(character_name="Алиса", text="Я найду брата!")
+            )
+        )
+
+        await sut.generate(scene_id=scene.id)
+
+        user_prompt = generator.last_user_prompt
+        assert "Персонажи новеллы:" in user_prompt
+        # Боба нет в сцене, но он остаётся в полном касте в голове промпта.
+        assert "Боб" in user_prompt
+        assert "Участники сцены: Алиса" in user_prompt
+        assert "Участники сцены: Алиса, Боб" not in user_prompt
 
 
 # ---------------------------------------------------------------------------
@@ -374,7 +421,7 @@ class TestGenerateWithUniverse:
 
         # Фаза загрузки ассетов детерминирована (фон -> персонажи по id)
         assert codex.calls[:9] == [
-            ("get_backgrounds", 1),
+            ("get_background_tags", 1),
             ("get_emotion_tags", ALICE_CODEX_ID),
             ("get_outfit_tags", ALICE_CODEX_ID),
             ("get_sprites", ALICE_CODEX_ID),
@@ -410,9 +457,9 @@ class TestGenerateWithUniverse:
 
         user_prompt = generator.last_user_prompt
         assert "Каталог ассетов" in user_prompt
-        assert "Фоны (background_slug)" in user_prompt
+        assert "Фоны (background_base_tag" in user_prompt
         generator.assert_system_contains(
-            "background_slug",
+            "background_base_tag",
             "sprite_slug",
             "outfit_tag",
             "emotion_base_tag",
@@ -556,7 +603,8 @@ class TestAssetMatching:
                 dialogue_line_payload(
                     character_name="Алиса",
                     text="Где же он?",
-                    background_slug="nonexistent",
+                    background_base_tag="nonexistent",
+                    background_modifier_tags=[],
                     sprite_slug="alice-base",
                     emotion_base_tag="angry",
                     emotion_modifier_tags=[],
@@ -653,7 +701,7 @@ class TestCodexErrors:
         return 1
 
     async def test_assets_request_failure_wrapped(self, sut, codex, world, generator):
-        codex.fail_on("get_backgrounds")
+        codex.fail_on("get_background_tags")
 
         with pytest.raises(GenerationError, match="Codex assets request failed"):
             await sut.generate(scene_id=world.scene.id)

@@ -5,7 +5,7 @@
 и те же сущности (вселенная, персонажи, локации) описываются в промптах одинаково.
 """
 
-from src.core.codex.models import Background, CodexCharacter, Universe
+from src.core.codex.models import Background, BackgroundTags, CodexCharacter, Tag, TagType, Universe
 from src.core.novels.services.generation.prompts.text import single_line
 
 
@@ -59,3 +59,34 @@ def render_all(
     if backgrounds:
         parts.append(render_locations(backgrounds))
     return "\n\n".join(parts)
+
+
+def time_of_day_tags(background_tags: BackgroundTags) -> list[Tag]:
+    """Теги времени суток из уточнений фонов вселенной (day/morning/night)."""
+    return [t for t in background_tags.modifiers if t.type == TagType.TIME_OF_DAY]
+
+
+def render_place_time_catalog(background_tags: BackgroundTags) -> str:
+    """Каталог локаций и времени суток для выбора место/времени шага роадмапа."""
+    locations = ", ".join(f"{t.slug}={t.name}" for t in background_tags.base) or "-"
+    times = ", ".join(f"{t.slug}={t.name}" for t in time_of_day_tags(background_tags)) or "-"
+    return (
+        f"Локации (location_slug, ТОЛЬКО из списка): {locations}\n"
+        f"Время суток (time_of_day, ТОЛЬКО из списка): {times}"
+    )
+
+
+def render_place_time(
+    location_slug: str | None,
+    time_of_day: str | None,
+    day: int | None,
+) -> str:
+    """Короткая строка «локация / время суток / день» для промпта; «не задано» при пустом."""
+    parts: list[str] = []
+    if location_slug:
+        parts.append(f"локация {location_slug}")
+    if time_of_day:
+        parts.append(f"время суток {time_of_day}")
+    if day is not None:
+        parts.append(f"день {day}")
+    return ", ".join(parts) if parts else "не задано"

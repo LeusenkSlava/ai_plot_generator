@@ -29,12 +29,11 @@ from src.core.novels.services.generation.prompts.cast import (
 
 logger = logging.getLogger(__name__)
 
-# Реплики прошлой сцены нужны только для стыка - длинные авторские вставки обрезаем
 PREVIOUS_LINE_MAX_CHARS = 300
 
 
 class DialogueGenerator(BaseGenerator):
-    """Тонкий оркестратор генерации диалога: сущности → ассеты → промпт → LLM → сохранение."""
+    """Генерация диалога: сущности → ассеты → промпт → LLM → сохранение."""
 
     def __init__(
         self,
@@ -71,17 +70,18 @@ class DialogueGenerator(BaseGenerator):
         if not roadmap:
             raise GenerationError(f"Roadmap with id {scene.roadmap_id} not found")
 
-        characters = await self._character_service.list_by_novel(roadmap.novel_id)
+        characters, all_characters = await self._scene_cast(scene, roadmap.novel_id)
         if not characters:
             raise GenerationError(f"No characters found for novel {roadmap.novel_id}")
+
         characters_by_name = {character.name: character for character in characters}
         protagonist = find_protagonist(characters)
 
         novel = await self._novel_service.get(roadmap.novel_id)
-        assets = await self._scene_assets.load_assets(
-            novel.universe_id if novel else None, characters
-        )
 
+        assets = await self._scene_assets.load_assets(
+            novel.universe_id if novel else None, all_characters
+        )
         last_outfits = await self._dialogue_line_service.last_outfit_per_character(
             roadmap.novel_id
         )
@@ -92,6 +92,7 @@ class DialogueGenerator(BaseGenerator):
         prompt = self.__create_prompt(
             scene,
             characters,
+            all_characters,
             protagonist,
             assets,
             previous_lines or [],
@@ -155,25 +156,53 @@ class DialogueGenerator(BaseGenerator):
 
         return dialogue_lines
 
+    async def _scene_cast(
+        self, scene: Scene, novel_id: int
+    ) -> tuple[list[Character], list[Character]]:
+        """Персонажи, присутствующие в сцене, и весь каст новеллы.
+
+        Список «кто в сцене» формирует SceneGenerator (scene.character_ids) по месту/времени
+        шага. Если список пуст (старая сцена без списка), возвращаем весь каст — обратная
+        совместимость с уже сгенерированными сценами. Весь каст нужен отдельно, чтобы
+        подписывать имена в «последних репликах» даже для персонажей не из текущей сцены.
+        """
+        all_characters = await self._character_service.list_by_novel(novel_id) or []
+        if not scene.character_ids:
+            return all_characters, all_characters
+        ids = set(scene.character_ids)
+        return [c for c in all_characters if c.id in ids], all_characters
+
     def __create_prompt(
         self,
         scene: Scene,
         characters: list[Character],
+        all_characters: list[Character],
         protagonist: Character | None,
         assets: SceneAssets,
         previous_lines: list[DialogueLine],
         story_context: str | None,
         current_outfits: str,
     ) -> list[dict]:
-        cast = render_cast(characters)
+        # Полный каст в фиксированном порядке — стабильная голова промпта для кэша.
+        cast = render_cast(all_characters)
+        scene_participants = ", ".join(c.name for c in characters)
 
         system_prompt = {
             "role": "system",
             "content": (
                 "Ты сценарист интерактивных визуальных новелл. "
                 "На основе описания сцены и списка персонажей напиши диалог, который в ней происходит. "
-                "Используй только персонажей из списка, ссылаясь на них по имени точно как в списке. "
-                "Количество реплик определи сам исходя из содержания сцены — обычно от 4 до 12. "
+                "Пиши реплики только за персонажей, перечисленных в блоке «Участники сцены»; "
+                "остальные персонажи новеллы в этой сцене не появляются и не говорят. "
+                "Количество реплик определи сам исходя из содержания сцены — обычно от 8 до 16, "
+                "но не меньше 6. Не обрывай сцену на полуслове: доводи ключевой разговор сцены "
+                "до логичной точки, а не обрезай его на чужой реплике-зацепке. "
+                "Не заканчивай сцену мыслью-выводом или моралью, которая проговаривает уже показанное: "
+                "финальная реплика сцены должна оставлять конкретную деталь, действие или реплику, "
+                "а не интерпретацию; избегай оборотов «кажется», «может», «наверное», «это и называется». "
+                "Кульминацию (выступление, признание, решающий поступок) не пересказывай итогом: "
+                "показывай её по битам — хотя бы один кризисный момент внутри события и его преодоление, "
+                "прежде чем оно завершится. "
                 "История линейная: не предлагай игроку вариантов выбора.\n"
                 "Для каждой реплики укажи:\n"
                 "1. character_name - имя говорящего персонажа, точно как в списке.\n"
@@ -205,7 +234,7 @@ class DialogueGenerator(BaseGenerator):
             )
         # Сначала неизменное для новеллы (персонажи, каталог), потом меняющееся:
         # так работает кеш префикса у провайдера
-        user_content = f"Персонажи:\n{cast}"
+        user_content = f"Персонажи новеллы:\n{cast}"
         if assets:
             system_prompt["content"] += (
                 "\nДля визуала каждой реплики выбери ассеты ТОЛЬКО из каталога, "
@@ -227,7 +256,7 @@ class DialogueGenerator(BaseGenerator):
                 "Наряд персонажа не меняется между репликами и сценами: используй его текущий "
                 "outfit_tag, пока по сюжету персонаж явно не переоделся."
             )
-            user_content += f"\n\nКаталог ассетов:\n{self._scene_assets.assets_catalog(characters, assets)}"
+            user_content += f"\n\nКаталог ассетов:\n{self._scene_assets.assets_catalog(all_characters, assets)}"
         if story_context:
             user_content += (
                 "\n\nИзложение истории на данный момент (не противоречь ему, "
@@ -237,7 +266,7 @@ class DialogueGenerator(BaseGenerator):
         if current_outfits:
             user_content += f"\n\nТекущие наряды персонажей:\n{current_outfits}"
         if previous_lines:
-            names = {character.id: character.name for character in characters}
+            names = {character.id: character.name for character in all_characters}
             recap = "\n".join(
                 f"{names.get(line.character_id, '?')}"
                 f"{' (мысли)' if line.is_thought else ''}: "
@@ -246,6 +275,7 @@ class DialogueGenerator(BaseGenerator):
             )
             user_content += f"\n\nПоследние реплики предыдущей сцены (продолжи историю, не повторяя их):\n{recap}"
         user_content += f"\n\nСцена: {scene.title}\nОписание сцены: {scene.description}"
+        user_content += f"\nУчастники сцены: {scene_participants}"
 
         user_prompt = {"role": "user", "content": user_content}
         return [system_prompt, user_prompt]

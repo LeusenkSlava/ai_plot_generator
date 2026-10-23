@@ -73,6 +73,7 @@ class NovelPlaybackService:
             raise NovelNotFoundError(novel_id)
 
         lines = await self._dialogue_lines.list_by_novel_id(novel_id)
+        lines = await self._exclude_review_lines(novel_id, lines)
 
         index = self._resolve_index(lines, dialogue_line_id)
 
@@ -83,6 +84,20 @@ class NovelPlaybackService:
             )
 
         return await self._resolve_tail_status(novel_id)
+
+    async def _exclude_review_lines(
+        self, novel_id: int, lines: list[DialogueLine]
+    ) -> list[DialogueLine]:
+        """Отбрасывает реплики сцен, не прошедших смысловую проверку (needs_review).
+
+        Такая сцена не должна показываться игроку: её реплики пропускаются, а шаг
+        остаётся незакрытым, чтобы сцена была перегенерирована.
+        """
+        scenes = await self._scenes.list_by_novel_id(novel_id)
+        review_scene_ids = {scene.id for scene in scenes if scene.needs_review}
+        if not review_scene_ids:
+            return lines
+        return [line for line in lines if line.scene_id not in review_scene_ids]
 
     @staticmethod
     def _resolve_index(lines: list[DialogueLine], dialogue_line_id: int | None) -> int:

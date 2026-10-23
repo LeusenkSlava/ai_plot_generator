@@ -88,3 +88,4 @@ __pycache__/
 
 llm_logs/
 .pytest_cache/
+docs/
