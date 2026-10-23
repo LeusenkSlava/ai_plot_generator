@@ -18,7 +18,10 @@ from src.core.novels.services.generation.prompts.cast import (
     render_cast,
 )
 from src.core.novels.services.generation.prompts.context import render_place_time
-from src.core.novels.services.generation.prompts.text import parse_day
+from src.core.novels.services.generation.prompts.text import (
+    RUSSIAN_OUTPUT_NOTE,
+    parse_day,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -219,7 +222,9 @@ class SceneGenerator(BaseGenerator):
         )
 
     @staticmethod
-    def __place_time(data: dict, roadmap: Roadmap) -> tuple[str | None, str | None, int | None]:
+    def __place_time(
+        data: dict, roadmap: Roadmap
+    ) -> tuple[str | None, str | None, int | None]:
         """Место/время сцены: явно заданное LLM, иначе — от шага роадмапа."""
         location = (data.get("location_slug") or "").strip() or roadmap.location_slug
         time_of_day = (data.get("time_of_day") or "").strip() or roadmap.time_of_day
@@ -251,24 +256,24 @@ class SceneGenerator(BaseGenerator):
             return {
                 "role": "user",
                 "content": (
-                    f"Сцена повторяет предыдущую сцену «{duplicate_of.title}»: то же место, "
-                    "тот же день и те же участники. Перепиши её так, чтобы она двигала сюжет "
-                    "дальше — новая ситуация, новый конфликт или новое развитие, а не "
-                    "переигрывание уже случившегося. Место и день оставь как у шага роадмапа."
+                    f"The scene repeats the previous scene «{duplicate_of.title}»: the same place, "
+                    "the same day, and the same participants. Rewrite it so that it moves the plot "
+                    "further — a new situation, a new conflict, or new development, not a "
+                    "replaying of what already happened. Keep the place and day as in the roadmap step."
                 ),
             }
-        reason = reason or "не указана"
+        reason = reason or "not specified"
         return {
             "role": "user",
             "content": (
-                f"Сцена не подходит для текущего шага роадмапа. Вернись к шагу "
-                f"«{roadmap.title}» (цель: {roadmap.goal}) и перепиши сцену так, "
-                "чтобы она совпадала с ним по трём осям:\n"
-                "- тема/событие — что должно произойти на этом шаге;\n"
-                "- место — локация, где происходит шаг;\n"
-                "- время — день/этап, в который происходит шаг.\n"
-                "Указывай в characters только имена из списка персонажей выше.\n"
-                f"Причина: {reason}"
+                f"The scene does not fit the current roadmap step. Return to the step "
+                f"«{roadmap.title}» (goal: {roadmap.goal}) and rewrite the scene so that "
+                "it matches it on three axes:\n"
+                "- theme/event — what should happen in this step;\n"
+                "- place — the location where the step takes place;\n"
+                "- time — the day/stage in which the step takes place.\n"
+                "In characters, list only names from the character list above.\n"
+                f"Reason: {reason}"
             ),
         }
 
@@ -298,30 +303,30 @@ class SceneGenerator(BaseGenerator):
         system_prompt = {
             "role": "system",
             "content": (
-                "Ты сценарист интерактивных визуальных новелл. "
-                "На основе описания истории и текущего шага роадмапа создай очередную сцену этого шага. "
-                "Она должна продолжать предыдущие сцены, не повторяя их, "
-                "и продвигать сюжет к цели шага. "
-                "Сцена должна раскрывать цель шага и задавать место и ситуацию действия, "
-                "но не пересказывать сами диалоги. Если сцена — кульминация, задай в описании "
-                "конкретный кризис или помеху внутри события, а не только его исход. Укажи:\n"
-                "1. title - короткое название сцены.\n"
-                "2. description - описание места, времени, ситуации и конфликта сцены, "
-                "на основе которого дальше будут сгенерированы диалоги персонажей: "
-                "2-4 предложения, не больше 400 символов, без атмосферных подробностей.\n"
-                "3. characters - имена персонажей, которые находятся в этой сцене по месту и времени "
-                "(точно как в списке персонажей). Включай только тех, кому здесь есть место; "
-                "не вписывай персонажа, которому тут не место (например, того, кто не покидает "
-                "свою локацию, — в сцену в другом месте). Главного героя включать не обязательно: "
-                "он присутствует всегда и добавляется автоматически.\n"
-                "4. location_slug - slug локации сцены: тот же, что у шага роадмапа (пустая строка, "
-                "если шаг его не задаёт).\n"
-                "5. time_of_day - slug времени суток сцены (пустая строка, если шаг его не задаёт); "
-                "внутри шага может меняться, если это один и тот же день.\n"
-                "6. day - номер дня истории (целое число от 1): тот же, что у шага роадмапа.\n"
-                "Если сцена начинается позже по времени или в другом месте, чем предыдущая, "
-                "обозначь этот разрыв прямо в description.\n"
-                "Отвечай СТРОГО в формате JSON, соответствующего этой схеме:\n"
+                "You are a screenwriter for interactive visual novels. "
+                "Based on the description of the story and the current roadmap step, create the next scene of this step. "
+                "It should continue the previous scenes without repeating them "
+                "and move the plot toward the step's goal. "
+                "The scene should unfold the step's goal and establish the place and situation of the action, "
+                "but not retell the dialogues themselves. If the scene is a climax, specify in the description "
+                "a concrete crisis or obstacle within the event, not just its outcome. Specify:\n"
+                "1. title - a short title for the scene.\n"
+                "2. description - a description of the place, time, situation, and conflict of the scene, "
+                "from which the characters' dialogues will then be generated: "
+                "2-4 sentences, no more than 400 characters, no atmospheric details.\n"
+                "3. characters - the names of the characters who are in this scene by place and time "
+                "(exactly as in the character list). Include only those who belong here; "
+                "do not include a character who does not belong here (for example, someone who never leaves "
+                "their own location — in a scene elsewhere). Including the protagonist is optional: "
+                "they are always present and are added automatically.\n"
+                "4. location_slug - the slug of the scene's location: the same as the roadmap step's (empty string "
+                "if the step does not set one).\n"
+                "5. time_of_day - the slug of the scene's time of day (empty string if the step does not set one); "
+                "it may change within the step if it is the same day.\n"
+                "6. day - the story day number (integer from 1): the same as the roadmap step's.\n"
+                "If the scene starts later in time or in a different place than the previous one, "
+                "note this gap directly in description.\n"
+                "Answer STRICTLY as JSON matching this schema:\n"
                 """
                 {
                   "title": string,
@@ -335,42 +340,41 @@ class SceneGenerator(BaseGenerator):
             ),
         }
         # Сначала неизменное для новеллы, потом меняющееся: так работает кеш префикса у провайдера
-        user_content = (
-            f"Название истории: {novel.title}\n" f"Тон повествования: {novel.tone}"
-        )
+        user_content = f"Story title: {novel.title}\n" f"Narrative tone: {novel.tone}"
         if characters:
-            user_content += f"\nПерсонажи:\n{render_cast(characters)}"
+            user_content += f"\nCharacters:\n{render_cast(characters)}"
             protagonist = find_protagonist(characters)
             if protagonist:
                 user_content += (
-                    f"\n\nГлавный герой: {protagonist.name} — протагонист. "
-                    "Сцена должна подаваться через его восприятие: его цели, чувства и выборы."
+                    f"\n\nProtagonist: {protagonist.name} — the protagonist. "
+                    "The scene should be presented through their perception: their goals, feelings, and choices."
                 )
         user_content += (
-            f"\n\nМесто и время шага: "
+            f"\n\nStep place and time: "
             f"{render_place_time(roadmap.location_slug, roadmap.time_of_day, roadmap.day)}."
         )
         # Блок шага — в голову (стабилен внутри шага, попадает в кэш), а не после
         # динамического изложения и предыдущих сцен.
         user_content += (
-            f"\n\nШаг роадмапа: {roadmap.title}\n"
-            f"Цель шага: {roadmap.goal}\n"
-            f"Номер сцены в шаге: {step_position} из {scenes_count}"
+            f"\n\nRoadmap step: {roadmap.title}\n"
+            f"Step goal: {roadmap.goal}\n"
+            f"Scene number within the step: {step_position} of {scenes_count}"
         )
         if story_context:
             user_content += (
-                "\n\nИзложение истории на данный момент (сцена не должна ему противоречить; "
-                f"одежду персонажей не меняй без сюжетной причины):\n{story_context}"
+                "\n\nStory so far (the scene must not contradict it; "
+                f"do not change characters' outfits without a plot reason):\n{story_context}"
             )
         if previous_scenes:
             # Что произошло, уже есть в изложении — полностью нужна только последняя сцена для стыка
             *earlier, last = previous_scenes
             story_so_far = "".join(f"- {scene.title}\n" for scene in earlier)
             story_so_far += f"- {last.title}: {last.description}"
-            user_content += f"\n\nПредыдущие сцены:\n{story_so_far}"
+            user_content += f"\n\nPrevious scenes:\n{story_so_far}"
             user_content += (
-                f"\nКонец предыдущей сцены: "
+                f"\nEnd of the previous scene: "
                 f"{render_place_time(last.location_slug, last.time_of_day, last.day)}."
             )
+        system_prompt["content"] += f"\n{RUSSIAN_OUTPUT_NOTE}"
         user_prompt = {"role": "user", "content": user_content}
         return [system_prompt, user_prompt]

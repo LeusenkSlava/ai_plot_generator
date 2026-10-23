@@ -31,6 +31,7 @@ class CharacterRepository:
             arc=character.arc,
             voice_notes=character.voice_notes,
             codex_character_id=character.codex_character_id,
+            gender=character.gender,
             is_protagonist=character.is_protagonist,
         )
         self._session.add(db_character)
@@ -67,6 +68,7 @@ class CharacterRepository:
             arc=db_character.arc,
             voice_notes=db_character.voice_notes,
             codex_character_id=db_character.codex_character_id,
+            gender=db_character.gender,
             is_protagonist=db_character.is_protagonist,
         )
 

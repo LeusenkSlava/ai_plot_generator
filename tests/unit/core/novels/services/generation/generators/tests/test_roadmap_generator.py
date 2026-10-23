@@ -117,8 +117,8 @@ class TestRoadmapPlaceTime:
         await sut.generate(novel.id)
 
         generator.assert_system_contains(
-            "только на персонажах из списка",
-            "не упоминай в goal персонажей",
+            "only on the characters from the list",
+            "do not mention in goal characters",
         )
 
     async def test_system_prompt_guides_structure(self):
@@ -134,13 +134,13 @@ class TestRoadmapPlaceTime:
         await sut.generate(novel.id)
 
         generator.assert_system_contains(
-            "от 8 до 12",
-            "круг Хармана",
-            "8 битов",
-            "сквозная линия",
-            "поворот",
-            "мини-арку",
-            "препятствие",
+            "8 to 12",
+            "Harmon's story circle",
+            "8 beats",
+            "through-line",
+            "turn",
+            "mini-arc",
+            "obstacle",
         )
 
     async def test_parses_place_time_day(self):

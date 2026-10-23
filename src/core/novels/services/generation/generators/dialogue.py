@@ -26,6 +26,7 @@ from src.core.novels.services.generation.prompts.cast import (
     find_protagonist,
     render_cast,
 )
+from src.core.novels.services.generation.prompts.text import RUSSIAN_OUTPUT_NOTE
 
 logger = logging.getLogger(__name__)
 
@@ -190,27 +191,27 @@ class DialogueGenerator(BaseGenerator):
         system_prompt = {
             "role": "system",
             "content": (
-                "Ты сценарист интерактивных визуальных новелл. "
-                "На основе описания сцены и списка персонажей напиши диалог, который в ней происходит. "
-                "Пиши реплики только за персонажей, перечисленных в блоке «Участники сцены»; "
-                "остальные персонажи новеллы в этой сцене не появляются и не говорят. "
-                "Количество реплик определи сам исходя из содержания сцены — обычно от 8 до 16, "
-                "но не меньше 6. Не обрывай сцену на полуслове: доводи ключевой разговор сцены "
-                "до логичной точки, а не обрезай его на чужой реплике-зацепке. "
-                "Не заканчивай сцену мыслью-выводом или моралью, которая проговаривает уже показанное: "
-                "финальная реплика сцены должна оставлять конкретную деталь, действие или реплику, "
-                "а не интерпретацию; избегай оборотов «кажется», «может», «наверное», «это и называется». "
-                "Кульминацию (выступление, признание, решающий поступок) не пересказывай итогом: "
-                "показывай её по битам — хотя бы один кризисный момент внутри события и его преодоление, "
-                "прежде чем оно завершится. "
-                "История линейная: не предлагай игроку вариантов выбора.\n"
-                "Для каждой реплики укажи:\n"
-                "1. character_name - имя говорящего персонажа, точно как в списке.\n"
-                "2. text - текст реплики.\n"
-                "3. is_thought - boolean. True, если реплика главного героя — его внутренние мысли "
-                "(не произносится вслух, отображается как внутренний монолог); для речи вслух и для "
-                "остальных персонажей всегда false.\n"
-                "Отвечай СТРОГО в формате JSON, соответствующего этой схеме:\n"
+                "You are a screenwriter for interactive visual novels. "
+                "Based on the description of the scene and the list of characters, write the dialogue that takes place in it. "
+                "Write lines only for the characters listed in the «Scene participants» block; "
+                "the other characters of the novel do not appear or speak in this scene. "
+                "Decide the number of lines yourself based on the content of the scene — usually 8 to 16, "
+                "but no fewer than 6. Do not cut the scene off mid-sentence: bring the scene's key conversation "
+                "to a logical point instead of cutting it on someone else's hook line. "
+                "Do not end the scene with a concluding thought or a moral that spells out what was already shown: "
+                "the scene's final line should leave a concrete detail, action, or line, "
+                "not an interpretation; avoid turns of phrase like «кажется», «может», «наверное», «это и называется». "
+                "Do not summarize the climax (a performance, a confession, a decisive act) as an outcome: "
+                "show it beat by beat — at least one crisis moment within the event and its resolution, "
+                "before it concludes. "
+                "The story is linear: do not offer the player any choices.\n"
+                "For each line, specify:\n"
+                "1. character_name - the name of the speaking character, exactly as in the list.\n"
+                "2. text - the text of the line.\n"
+                "3. is_thought - boolean. True if the protagonist's line is their inner thoughts "
+                "(not spoken aloud, shown as an inner monologue); for speech out loud and for "
+                "all other characters it is always false.\n"
+                "Answer STRICTLY as JSON matching this schema:\n"
                 """
                 {
                   "dialogue_lines": [
@@ -226,56 +227,57 @@ class DialogueGenerator(BaseGenerator):
         }
         if protagonist:
             system_prompt["content"] += (
-                f"\nГлавный герой — {protagonist.name}. История идёт от его лица, "
-                "поэтому строй диалог вокруг его восприятия, целей и решений. "
-                "У него нет спрайта и эмоций на экране: для его реплик не указывай спрайт, наряд и эмоции. "
-                "Его реплики могут быть речью вслух (is_thought=false) или внутренними мыслями "
-                "(is_thought=true) — используй внутренние мысли, чтобы передавать его переживания и мотивы."
+                f"\nThe protagonist is {protagonist.name}. The story is told from their point of view, "
+                "so build the dialogue around their perception, goals, and decisions. "
+                "They have no sprite or emotions on screen: for their lines do not specify a sprite, outfit, or emotions. "
+                "Their lines can be speech out loud (is_thought=false) or inner thoughts "
+                "(is_thought=true) — use inner thoughts to convey their feelings and motives."
             )
         # Сначала неизменное для новеллы (персонажи, каталог), потом меняющееся:
         # так работает кеш префикса у провайдера
-        user_content = f"Персонажи новеллы:\n{cast}"
+        user_content = f"Novel characters:\n{cast}"
         if assets:
             system_prompt["content"] += (
-                "\nДля визуала каждой реплики выбери ассеты ТОЛЬКО из каталога, "
-                "указывая slug и теги точно как в каталоге, и добавь в объект реплики поля:\n"
-                "- background_base_tag - ОДИН тег локации из списка локаций, подходящий месту сцены "
-                "(обычно один на всю сцену, меняй только если действие переходит в другое место);\n"
-                "- background_modifier_tags - список из 0 и более тегов-уточнений из списка уточнений "
-                "(время суток, внутри/снаружи, свет, люди), соответствующих времени и обстановке сцены;\n"
-                "- sprite_slug - спрайт говорящего персонажа;\n"
-                "- outfit_tag - ОДИН тег стиля одежды из списка одежды говорящего;\n"
-                "- emotion_base_tag - ОДИН главный тег эмоции говорящего из его базовых эмоций, "
-                "соответствующий тексту реплики;\n"
-                "- emotion_modifier_tags - список из 0 и более тегов-уточнений эмоции "
-                "из модификаторов говорящего.\n"
-                "Для реплик главного героя (без спрайта) ставь null для sprite_slug, outfit_tag, "
-                "emotion_base_tag и пустой список [] для emotion_modifier_tags; "
-                "фон (background_base_tag и background_modifier_tags) укажи как для остальных реплик.\n"
-                "Если подходящего ассета нет - ставь null; для emotion_modifier_tags ставь пустой список [].\n"
-                "Наряд персонажа не меняется между репликами и сценами: используй его текущий "
-                "outfit_tag, пока по сюжету персонаж явно не переоделся."
+                "\nFor the visual of each line, pick assets ONLY from the catalog, "
+                "specifying slugs and tags exactly as in the catalog, and add these fields to the line object:\n"
+                "- background_base_tag - ONE location tag from the location list that fits the scene's place "
+                "(usually one for the whole scene; change it only if the action moves to another place);\n"
+                "- background_modifier_tags - a list of 0 or more modifier tags from the modifier list "
+                "(time of day, inside/outside, light, people) matching the scene's time and setting;\n"
+                "- sprite_slug - the sprite of the speaking character;\n"
+                "- outfit_tag - ONE outfit style tag from the speaker's outfit list;\n"
+                "- emotion_base_tag - ONE main emotion tag of the speaker from their base emotions, "
+                "matching the text of the line;\n"
+                "- emotion_modifier_tags - a list of 0 or more emotion modifier tags "
+                "from the speaker's modifiers.\n"
+                "For the protagonist's lines (no sprite), set null for sprite_slug, outfit_tag, "
+                "emotion_base_tag and an empty list [] for emotion_modifier_tags; "
+                "specify the background (background_base_tag and background_modifier_tags) as for other lines.\n"
+                "If there is no suitable asset, set null; for emotion_modifier_tags set an empty list [].\n"
+                "A character's outfit does not change between lines and scenes: keep using their current "
+                "outfit_tag until the plot clearly has them change clothes."
             )
-            user_content += f"\n\nКаталог ассетов:\n{self._scene_assets.assets_catalog(all_characters, assets)}"
+            user_content += f"\n\nAsset catalog:\n{self._scene_assets.assets_catalog(all_characters, assets)}"
         if story_context:
             user_content += (
-                "\n\nИзложение истории на данный момент (не противоречь ему, "
-                "персонажи одеты так, как в нём указано, пока по сюжету не переоденутся):\n"
+                "\n\nStory so far (do not contradict it; "
+                "characters are dressed as stated there until the plot has them change clothes):\n"
                 f"{story_context}"
             )
         if current_outfits:
-            user_content += f"\n\nТекущие наряды персонажей:\n{current_outfits}"
+            user_content += f"\n\nCurrent character outfits:\n{current_outfits}"
         if previous_lines:
             names = {character.id: character.name for character in all_characters}
             recap = "\n".join(
                 f"{names.get(line.character_id, '?')}"
-                f"{' (мысли)' if line.is_thought else ''}: "
+                f"{' (thoughts)' if line.is_thought else ''}: "
                 f"{_short(line.text, PREVIOUS_LINE_MAX_CHARS)}"
                 for line in previous_lines
             )
-            user_content += f"\n\nПоследние реплики предыдущей сцены (продолжи историю, не повторяя их):\n{recap}"
-        user_content += f"\n\nСцена: {scene.title}\nОписание сцены: {scene.description}"
-        user_content += f"\nУчастники сцены: {scene_participants}"
+            user_content += f"\n\nLast lines of the previous scene (continue the story, do not repeat them):\n{recap}"
+        user_content += f"\n\nScene: {scene.title}\nScene description: {scene.description}"
+        user_content += f"\nScene participants: {scene_participants}"
+        system_prompt["content"] += f"\n{RUSSIAN_OUTPUT_NOTE}"
 
         user_prompt = {"role": "user", "content": user_content}
         return [system_prompt, user_prompt]

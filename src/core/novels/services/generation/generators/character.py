@@ -8,6 +8,7 @@ from src.core.novels.models import Character, Novel
 from src.core.novels.services.crud import CharacterService, NovelService
 from src.core.novels.services.generation.generators.base import BaseGenerator
 from src.core.novels.services.generation.prompts.context import render_character_catalog
+from src.core.novels.services.generation.prompts.text import RUSSIAN_OUTPUT_NOTE
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +72,7 @@ class CharacterGenerator(BaseGenerator):
                 arc=item["arc"],
                 voice_notes=item["voice_notes"],
                 codex_character_id=codex_character.id if codex_character else None,
+                gender=codex_character.gender if codex_character else None,
                 is_protagonist=bool(item.get("is_protagonist", False)),
             )
             characters.append(character)
@@ -107,19 +109,19 @@ class CharacterGenerator(BaseGenerator):
         system_prompt = {
             "role": "system",
             "content": (
-                "Ты сценарист интерактивных визуальных новелл. "
-                "На основе описания истории и её тона создай набор персонажей для сюжета. "
-                "Количество персонажей определи сам исходя из масштаба истории — обычно от 2 до 6. "
-                "Обязательно включи главного героя/героиню и хотя бы одного антагониста или значимого второстепенного персонажа. "
-                "Для каждого персонажа укажи:\n"
-                "1. name - имя персонажа.\n"
-                "2. role - роль в истории (протагонист, антагонист, союзник, love interest и т.д.).\n"
-                "3. arc - краткое описание сюжетной арки персонажа.\n"
-                "4. voice_notes - заметки о манере речи и характере, которые помогут в дальнейшем генерировать диалоги.\n"
-                "5. is_protagonist - boolean. true ТОЛЬКО для главного героя/героини, "
-                "от чьего лица игрок переживает историю; у него не отображается спрайт, "
-                "и в диалогах доступны его внутренние мысли. Главный герой должен быть РОВНО один.\n"
-                "Отвечай СТРОГО в формате JSON, соответствующего этой схеме:\n"
+                "You are a screenwriter for interactive visual novels. "
+                "Based on the description of the story and its tone, create a set of characters for the plot. "
+                "Decide the number of characters yourself based on the scale of the story — usually 2 to 6. "
+                "Be sure to include a protagonist (hero/heroine) and at least one antagonist or a significant supporting character. "
+                "For each character, specify:\n"
+                "1. name - the character's name.\n"
+                "2. role - the role in the story (protagonist, antagonist, ally, love interest, etc.).\n"
+                "3. arc - a short description of the character's story arc.\n"
+                "4. voice_notes - notes on the character's manner of speech and personality that will help generate dialogues later.\n"
+                "5. is_protagonist - boolean. true ONLY for the protagonist, "
+                "through whose eyes the player experiences the story; they have no sprite shown, "
+                "and their inner thoughts are available in dialogues. There must be EXACTLY one protagonist.\n"
+                "Answer STRICTLY as JSON matching this schema:\n"
                 """
                 {
                   "characters": [
@@ -136,22 +138,23 @@ class CharacterGenerator(BaseGenerator):
             ),
         }
         user_content = (
-            f"Название: {novel.title}\n"
-            f"Описание: {novel.description}\n"
-            f"Тон повествования: {novel.tone}"
+            f"Title: {novel.title}\n"
+            f"Description: {novel.description}\n"
+            f"Narrative tone: {novel.tone}"
         )
         if codex_characters:
             system_prompt["content"] += (
-                "\nИстория происходит в существующей вселенной. Бери персонажей ТОЛЬКО из базы знаний ниже: "
-                "имя, характер и манеру речи передавай точно по их описанию, ничего не выдумывай. "
-                "Для каждого персонажа добавь поле codex_slug - slug персонажа из базы знаний, точно как в списке.\n"
-                "Главного героя определяй по описанию истории, а не по базе знаний: если в описании главный герой — "
-                "другой человек, который занимает место главного героя этой вселенной, сделай протагонистом его "
-                "(is_protagonist=true, codex_slug не указывай). В характеристиках остальных персонажей, где "
-                "упоминается прежний главный герой, заменяй его имя на имя нового главного героя, сохраняя факты — "
-                "в том числе с кем живёт персонаж (например, «живёт в домике с Семёном» → «живёт в домике с Кахевником»)."
+                "\nThe story takes place in an existing universe. Take characters ONLY from the knowledge base below: "
+                "convey their name, personality, and manner of speech exactly per their description; do not invent anything. "
+                "For each character add the field codex_slug - the character's slug from the knowledge base, exactly as in the list.\n"
+                "Determine the protagonist from the story description, not from the knowledge base: if the story's protagonist is "
+                "a different person who takes the place of this universe's protagonist, make them the protagonist "
+                "(is_protagonist=true, do not set codex_slug). In the other characters' traits, wherever the previous "
+                "protagonist is mentioned, replace their name with the new protagonist's name while keeping the facts — "
+                "including who the character lives with (for example, «живёт в домике с Семёном» → «живёт в домике с Кахевником»)."
             )
             catalog = render_character_catalog(codex_characters)
-            user_content += f"\nПерсонажи из базы знаний:\n{catalog}"
+            user_content += f"\nCharacters from the knowledge base:\n{catalog}"
+        system_prompt["content"] += f"\n{RUSSIAN_OUTPUT_NOTE}"
         user_prompt = {"role": "user", "content": user_content}
         return [system_prompt, user_prompt]

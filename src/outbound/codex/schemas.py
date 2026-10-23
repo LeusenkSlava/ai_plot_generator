@@ -25,6 +25,7 @@ class CharacterSchema(BaseModel):
     name: str
     description: str
     speech_style: dict | None = None
+    gender: str | None = None
     tags: list[TagSchema] = []
 
 

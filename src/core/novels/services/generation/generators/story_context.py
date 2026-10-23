@@ -14,6 +14,7 @@ from src.core.novels.services.crud import (
     SceneService,
 )
 from src.core.novels.services.generation.generators.base import BaseGenerator
+from src.core.novels.services.generation.prompts.text import RUSSIAN_OUTPUT_NOTE
 
 logger = logging.getLogger(__name__)
 
@@ -234,10 +235,10 @@ class StoryState:
         """Текст изложения для промтов."""
         parts = []
         if self.summary:
-            parts.append(f"Краткое содержание:\n{self.summary}")
+            parts.append(f"Summary:\n{self.summary}")
         if self.key_facts:
             parts.append(
-                "Важные сюжетные факты:\n"
+                "Important plot facts:\n"
                 + "\n".join(
                     f"{i}. {f}" if numbered else f"- {f}"
                     for i, f in enumerate(self.key_facts, 1)
@@ -245,16 +246,16 @@ class StoryState:
             )
         if self.characters:
             parts.append(
-                "Состояние персонажей:\n"
+                "Character states:\n"
                 + "\n".join(
-                    f"- {name}: одежда — {c.get('outfit') or 'не указана'}; "
-                    f"состояние — {c.get('state') or 'не указано'}"
+                    f"- {name}: outfit — {c.get('outfit') or 'not specified'}; "
+                    f"state — {c.get('state') or 'not specified'}"
                     for name, c in self.characters.items()
                 )
             )
         if self.used_phrases:
             parts.append(
-                "Уже звучавшие фразы (не повторяй их дословно в следующих сценах):\n"
+                "Phrases already used (do not repeat them verbatim in later scenes):\n"
                 + "\n".join(f"- {p}" for p in self.used_phrases)
             )
         return "\n\n".join(parts)
@@ -356,37 +357,37 @@ class StoryContextGenerator(BaseGenerator):
     ) -> list[dict]:
         has_codex = novel.universe_id is not None
         outfit_instruction = (
-            "outfit оставляй пустой — наряд персонажа задаётся каталогом Codex "
-            "через outfit_tag в репликах, не выдумывай его."
+            "leave outfit empty — the character's outfit is set by the Codex catalog "
+            "via outfit_tag in the lines; do not invent it."
             if has_codex
-            else "outfit - во что одет сейчас (коротко: одежда, цвета); меняй ТОЛЬКО если "
-            "персонаж явно переоделся в этой сцене, иначе оставляй пустую строку. "
-            "Не переписывай уже указанную одежду другими словами."
+            else "outfit - what they are wearing now (briefly: clothes, colors); change it ONLY if "
+            "the character clearly changed clothes in this scene, otherwise leave an empty string. "
+            "Do not rewrite already-specified clothes in other words."
         )
         system_prompt = {
             "role": "system",
             "content": (
-                "Ты редактор интерактивной визуальной новеллы и ведёшь изложение истории, "
-                "по которому будут генерироваться следующие сцены. "
-                "По предыдущему изложению и диалогу новой сцены верни ТОЛЬКО изменения:\n"
-                "- summary - новое краткое содержание всей истории с учётом сцены, не больше 5 предложений. "
-                "Переписывай компактно, не повторяя дословно предыдущее изложение, и не пересказывай "
-                "одно и то же из сцены в сцену;\n"
-                "- remove_facts - номера фактов из предыдущего изложения, которые устарели, "
-                "больше не важны для сюжета или поглощены новыми;\n"
-                "- add_facts - новые факты из этой сцены, важные для сюжета дальше "
-                "(события, решения, тайны, обещания, отношения, предметы, где находятся персонажи), "
-                "каждый — одно короткое предложение до 120 символов. Факт считается дублем, если повторяет "
-                "смысл существующего факта, даже другими словами — не добавляй такие. Если новый факт "
-                "поглощает существующий, добавь номер поглощённого в remove_facts. "
-                f"После изменений фактов должно остаться не больше {MAX_KEY_FACTS};\n"
-                "- characters - только персонажи, у которых что-то изменилось или которые появились впервые: "
+                "You are the editor of an interactive visual novel and maintain the story recap "
+                "from which the following scenes will be generated. "
+                "Based on the previous recap and the new scene's dialogue, return ONLY the changes:\n"
+                "- summary - a new brief recap of the whole story including the scene, no more than 5 sentences. "
+                "Rewrite compactly, without repeating the previous recap verbatim, and do not retell "
+                "the same thing from scene to scene;\n"
+                "- remove_facts - the numbers of facts from the previous recap that are outdated, "
+                "no longer important to the plot, or absorbed by new ones;\n"
+                "- add_facts - new facts from this scene that matter for the plot going forward "
+                "(events, decisions, secrets, promises, relationships, objects, where characters are), "
+                "each a single short sentence up to 120 characters. A fact counts as a duplicate if it repeats "
+                "the meaning of an existing fact, even in different words — do not add such facts. If a new fact "
+                "absorbs an existing one, add the number of the absorbed one to remove_facts. "
+                f"No more than {MAX_KEY_FACTS} facts should remain after the changes;\n"
+                "- characters - only characters for whom something changed or who appear for the first time: "
                 f"{outfit_instruction} "
-                "state - физическое и эмоциональное состояние, до 80 символов. Пустая строка — без изменений;\n"
-                f"- used_phrases - до {MAX_USED_PHRASES} фраз-мотивов (2 и более слов, без имён персонажей), "
-                "которые уже звучали в истории более одного раза и не должны повторяться "
-                "дословно в следующих сценах.\n"
-                "Отвечай СТРОГО в формате JSON, соответствующего этой схеме:\n"
+                "state - physical and emotional state, up to 80 characters. Empty string means no changes;\n"
+                f"- used_phrases - up to {MAX_USED_PHRASES} motif phrases (2 or more words, no character names) "
+                "that have already been used in the story more than once and must not be repeated "
+                "verbatim in later scenes.\n"
+                "Answer STRICTLY as JSON matching this schema:\n"
                 """
                 {
                   "summary": string,
@@ -405,22 +406,25 @@ class StoryContextGenerator(BaseGenerator):
             ),
         }
         cast = "\n".join(
-            f"- {c.name} ({c.role}{', протагонист' if c.is_protagonist else ''})"
+            f"- {c.name} ({c.role}"
+            f"{', protagonist' if c.is_protagonist else ''}"
+            f"{', ' + c.gender if c.gender else ''})"
             for c in characters
         )
         names = {c.id: c.name for c in characters}
         dialogue = "\n".join(
             f"{names.get(line.character_id, '?')}"
-            f"{' (мысли)' if line.is_thought else ''}: {_short_line(line.text)}"
+            f"{' (thoughts)' if line.is_thought else ''}: {_short_line(line.text)}"
             for line in lines
         )
         user_content = (
-            f"Название истории: {novel.title}\n"
-            f"Персонажи:\n{cast}\n\n"
-            f"Предыдущее изложение:\n{state.render(numbered=True) or 'нет, это первая сцена'}\n\n"
-            f"Новая сцена: {scene.title}\n"
-            f"Описание сцены: {scene.description}\n"
-            f"Диалог сцены:\n{dialogue}"
+            f"Story title: {novel.title}\n"
+            f"Characters:\n{cast}\n\n"
+            f"Previous recap:\n{state.render(numbered=True) or 'none, this is the first scene'}\n\n"
+            f"New scene: {scene.title}\n"
+            f"Scene description: {scene.description}\n"
+            f"Scene dialogue:\n{dialogue}"
         )
+        system_prompt["content"] += f"\n{RUSSIAN_OUTPUT_NOTE}"
         user_prompt = {"role": "user", "content": user_content}
         return [system_prompt, user_prompt]

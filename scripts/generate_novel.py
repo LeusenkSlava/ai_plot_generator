@@ -17,6 +17,7 @@
     python3 scripts/generate_novel.py "Новелла про то, как герой учится писать промпты"
     python3 scripts/generate_novel.py "Детектив в киберпанке" --universe-id 1 --out novel.txt
     python3 scripts/generate_novel.py "Романтика в поезде" --base-url http://my_choice.localhost
+    python3 scripts/generate_novel.py --novel-id 42 --out novel.txt
 
 Зависимости — только стандартная библиотека Python.
 """
@@ -103,7 +104,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Сгенерировать новеллу целиком через My Choice API.",
     )
-    parser.add_argument("prompt", nargs="+", help="Текст промпта, по которому создаётся новелла")
+    parser.add_argument("prompt", nargs="*", help="Текст промпта, по которому создаётся новелла")
+    parser.add_argument(
+        "--novel-id",
+        type=int,
+        default=None,
+        help="ID уже созданной новеллы — пройти её до конца, не создавая новую",
+    )
     parser.add_argument("--universe-id", type=int, default=None, help="ID вселенной Codex (необязательно)")
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL, help=f"Адрес My Choice API (по умолчанию {DEFAULT_BASE_URL})")
     parser.add_argument("--out", default=None, help="Сохранить текст новеллы в файл")
@@ -114,36 +121,46 @@ def main() -> int:
     args = parser.parse_args()
 
     prompt = " ".join(args.prompt).strip()
-    if not prompt:
-        parser.error("Промпт не может быть пустым")
+
+    if args.novel_id is not None and prompt:
+        parser.error("Нельзя указывать одновременно промпт и --novel-id")
+    if args.novel_id is None and not prompt:
+        parser.error("Укажите промпт или --novel-id")
 
     base_url = args.base_url.rstrip("/")
     started = time.monotonic()
 
-    # 1. Создать задачу генерации новеллы.
-    payload = {"prompt": prompt}
-    if args.universe_id is not None:
-        payload["universe_id"] = args.universe_id
+    if args.novel_id is not None:
+        # Новелла уже создана — просто проходим её до конца.
+        novel_id = args.novel_id
+        print(f"Открываю существующую новеллу #{novel_id}", file=sys.stderr)
+    else:
+        # 1. Создать задачу генерации новеллы.
+        payload = {"prompt": prompt}
+        if args.universe_id is not None:
+            payload["universe_id"] = args.universe_id
 
-    print(f"Создаю новеллу: «{prompt}»", file=sys.stderr)
-    status, body = call_json(base_url, "POST", "/novels/", payload)
-    if status != 202:
-        raise ApiError(f"Не удалось создать новеллу: HTTP {status} {_detail(body)}")
+        print(f"Создаю новеллу: «{prompt}»", file=sys.stderr)
+        status, body = call_json(base_url, "POST", "/novels/", payload)
+        if status != 202:
+            raise ApiError(f"Не удалось создать новеллу: HTTP {status} {_detail(body)}")
 
-    job_id = body["id"]
-    print(f"Задача генерации новеллы: {job_id} (status={body.get('status')})", file=sys.stderr)
+        job_id = body["id"]
+        print(f"Задача генерации новеллы: {job_id} (status={body.get('status')})", file=sys.stderr)
 
-    job = wait_job(base_url, job_id, args.job_timeout, args.poll)
-    if job.get("status") == "failed":
-        raise ApiError(f"Новелла не сгенерирована: {job.get('error') or 'неизвестная ошибка'}")
+        job = wait_job(base_url, job_id, args.job_timeout, args.poll)
+        if job.get("status") == "failed":
+            raise ApiError(f"Новелла не сгенерирована: {job.get('error') or 'неизвестная ошибка'}")
 
-    novel_id = job.get("result_id")
-    if novel_id is None:
-        raise ApiError(f"Задача {job_id} завершена, но result_id пуст: {job}")
+        novel_id = job.get("result_id")
+        if novel_id is None:
+            raise ApiError(f"Задача {job_id} завершена, но result_id пуст: {job}")
 
     # 2. Карточка новеллы — для заголовка.
     title = None
     status, novel = call_json(base_url, "GET", f"/novels/{novel_id}")
+    if status == 404:
+        raise ApiError(f"Новелла #{novel_id} не найдена")
     if status == 200 and isinstance(novel, dict):
         title = novel.get("title")
 

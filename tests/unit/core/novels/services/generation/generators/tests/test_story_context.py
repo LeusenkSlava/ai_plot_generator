@@ -169,7 +169,7 @@ class TestUsedPhrasesLimit:
             novel, scene, [], [], StoryState()
         )
 
-        assert f"до {MAX_USED_PHRASES} фраз-мотивов" in prompt[0]["content"]
+        assert f"up to {MAX_USED_PHRASES} motif phrases" in prompt[0]["content"]
 
 
 class TestStoryStateUsedPhrases:
@@ -203,8 +203,8 @@ class TestStoryStateRender:
 
         rendered = state.render()
 
-        assert "Краткое содержание" in rendered
-        assert "Уже звучавшие фразы" in rendered
+        assert "Summary" in rendered
+        assert "Phrases already used" in rendered
         assert "Не ходи туда без меня" in rendered
 
     def test_render_numbered_facts(self):

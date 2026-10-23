@@ -41,7 +41,7 @@ class TestGenerateWithoutUniverse:
     async def test_prompt_has_no_codex_context(self, sut, generator):
         await sut.generate(user_prompt="про ведьму")
 
-        generator.assert_system_not_contains("существующей вселенной")
+        generator.assert_system_not_contains("an existing universe")
         assert generator.last_user_prompt == "про ведьму"
 
     async def test_prompt_is_two_messages(self, sut, generator):
@@ -54,7 +54,7 @@ class TestGenerateWithoutUniverse:
         await sut.generate(user_prompt="x")
 
         generator.assert_system_contains(
-            "сценарист интерактивных визуальных новелл",
+            "screenwriter for interactive visual novels",
             "json",
         )
 
@@ -121,7 +121,7 @@ class TestGenerateWithUniverse:
             "Боб: Рыцарь",
             "Лес",
             "Замок",
-            "ТОЛЬКО этих персонажей",
+            "ONLY these characters",
         )
 
     async def test_empty_characters_and_backgrounds(self, sut, codex, generator):
@@ -130,8 +130,8 @@ class TestGenerateWithUniverse:
         await sut.generate(user_prompt="x", universe_id=self.UNIVERSE_ID)
 
         generator.assert_system_not_contains(
-            "Персонажи (других нет):",
-            "Локации (других нет):",
+            "Characters (there are no others):",
+            "Locations (there are no others):",
         )
         generator.assert_system_contains("Мир Тьмы")
 

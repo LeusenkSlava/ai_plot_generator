@@ -9,11 +9,13 @@ def find_protagonist(characters: list[Character]) -> Character | None:
 
 
 def render_cast(characters: list[Character]) -> str:
-    """Список персонажей для промпта с пометкой протагониста."""
+    """Список персонажей для промпта с пометкой протагониста и пола."""
     lines = []
     for c in characters:
         role = c.role
         if c.is_protagonist:
-            role = f"{role} (протагонист)"
+            role = f"{role} (protagonist)"
+        if c.gender:
+            role = f"{role}, {c.gender}"
         lines.append(f"- {c.name} ({role}): {c.voice_notes}")
     return "\n".join(lines)

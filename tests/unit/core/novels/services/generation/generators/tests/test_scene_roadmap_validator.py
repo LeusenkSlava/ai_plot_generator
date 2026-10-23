@@ -100,8 +100,8 @@ class TestPromptIncludesPlaceTime:
         await validator.validate(roadmap, scene)
 
         user_prompt = generator.last_user_prompt
-        assert "Локация шага: aidpost" in user_prompt
-        assert "Время суток шага: day" in user_prompt
-        assert "День шага: 3" in user_prompt
-        assert "Локация сцены: aidpost" in user_prompt
-        assert "День сцены: 3" in user_prompt
+        assert "Step location: aidpost" in user_prompt
+        assert "Step time of day: day" in user_prompt
+        assert "Step day: 3" in user_prompt
+        assert "Scene location: aidpost" in user_prompt
+        assert "Scene day: 3" in user_prompt

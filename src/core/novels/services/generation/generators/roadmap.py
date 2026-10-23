@@ -18,7 +18,10 @@ from src.core.novels.services.generation.prompts.cast import (
 from src.core.novels.services.generation.prompts.context import (
     render_place_time_catalog,
 )
-from src.core.novels.services.generation.prompts.text import parse_day
+from src.core.novels.services.generation.prompts.text import (
+    RUSSIAN_OUTPUT_NOTE,
+    parse_day,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -66,9 +69,7 @@ class RoadmapGenerator(BaseGenerator):
             day = parse_day(item.get("day"))
             # День не убывает между шагами: пропущенный или «откатившийся» день
             # наследует предыдущий, чтобы таймлайн оставался монотонным.
-            if day is None:
-                day = prev_day
-            elif prev_day is not None and day < prev_day:
+            if day is None or (prev_day is not None and day < prev_day):
                 day = prev_day
             prev_day = day
 
@@ -126,53 +127,53 @@ class RoadmapGenerator(BaseGenerator):
         system_prompt = {
             "role": "system",
             "content": (
-                "Ты сценарист интерактивных визуальных новелл. "
-                "На основе описания истории и её тона создай роадмап сюжета — "
-                "последовательность шагов, из которых складывается линейная история без развилок и выборов игрока. "
-                "Количество шагов определи сам исходя из масштаба истории — обычно от 8 до 12; "
-                "чем больше шагов, тем богаче история, но каждый шаг должен двигать сюжет вперёд, "
-                "а не повторять предыдущий. "
-                "Для каждого шага укажи:\n"
-                "1. title - короткое название шага.\n"
-                "2. goal - ОДНО завершённое событие/бит, которое происходит на этом шаге; "
-                "не растягивай шаг на целую арку — он должен укладываться в 1–2 сцены.\n"
-                "3. scenes_count - 1 или 2 для обычного шага; финальному шагу и шагам с развязкой "
-                "персонажа можно ставить 2 или 3. Ставь 2/3, только если на каждую сцену есть "
-                "отдельный бит, иначе сцена переиграет предыдущую.\n"
-                "4. location_slug - slug локации, в которой происходит шаг, ТОЛЬКО из списка локаций "
-                "(если списка нет — пустая строка).\n"
-                "5. time_of_day - slug времени суток шага, ТОЛЬКО из списка времени суток "
-                "(если списка нет — пустая строка).\n"
-                "6. day - номер дня истории: целое число от 1, не убывает между шагами; "
-                "если шаг происходит в тот же день, что и предыдущий, укажи тот же номер.\n"
-                "Структура истории — круг Хармана из 8 битов. Держи этот порядок, "
-                "не переставляй и не пропускай биты:\n"
-                "1. Обычный мир — главный герой в привычной жизни; дай почувствовать его "
-                "неудовлетворённость или желание, чтобы было зачем меняться.\n"
-                "2. Потребность — конкретная цель/желание героя, задающая направление всей истории; "
-                "она же — сквозная линия из описания истории (тайна, цель, возвращение домой, "
-                "внутренний конфликт), которую не бросай до финала.\n"
-                "3. Переход — событие выбивает героя из привычной жизни в незнакомую ситуацию (завязка).\n"
-                "4. Поиск — герой пробует достичь цели, сталкивается с препятствиями, заводит отношения. "
-                "Около середины — поворот, который меняет ставки.\n"
-                "5. Находка — герой получает то, чего хотел, но в неожиданной или несовершенной форме.\n"
-                "6. Цена — за находку приходится платить: потеря, конфликт, последствие. Это реальное "
-                "препятствие/угроза срыва перед кульминацией — не веди к ней по прямой.\n"
-                "7. Возвращение — герой возвращается в привычную ситуацию, но уже изменённым; "
-                "ключевое событие (признание, решение, выступление) разыгрывается здесь.\n"
-                "8. Изменение — финальное состояние героя/мира и вывод истории; развязка, "
-                "а не обрыв накануне.\n"
-                "Разнеси биты по шагам: 8 битов → 8–12 шагов. Первые и последние биты обычно по одному шагу; "
-                "биты 4–6 можно растягивать на 2 шага. У значимых персонажей (союзник, соперник, "
-                "love interest) веди мини-арку внутри этих битов и разрешай её к битам 7–8, "
-                "а не появлением в одной сцене.\n"
-                "Разноси действие по месту и времени: не держи всю историю в одной локации, "
-                "если сюжет этого не требует; два соседних шага не должны происходить в одной локации "
-                "без сюжетной причины. Каждая сцена внутри шага должна соответствовать месту и дню шага.\n"
-                "Строй goal только на персонажах из списка ниже; не упоминай в goal персонажей, "
-                "которых нет в списке (даже если они существуют во вселенной) — сцены с такими "
-                "персонажами не пройдут проверку и будут перегенерированы.\n"
-                "Отвечай СТРОГО в формате JSON, соответствующего этой схеме:\n"
+                "You are a screenwriter for interactive visual novels. "
+                "Based on the description of the story and its tone, create a plot roadmap — "
+                "a sequence of steps that make up a linear story with no branches and no player choices. "
+                "Decide the number of steps yourself based on the scale of the story — usually 8 to 12; "
+                "the more steps, the richer the story, but each step must move the plot forward "
+                "rather than repeat the previous one. "
+                "For each step, specify:\n"
+                "1. title - a short title for the step.\n"
+                "2. goal - ONE completed event/beat that happens in this step; "
+                "do not stretch the step over a whole arc — it should fit into 1–2 scenes.\n"
+                "3. scenes_count - 1 or 2 for a regular step; the final step and steps with a character's "
+                "resolution may have 2 or 3. Use 2/3 only if each scene has its own "
+                "beat, otherwise the scene will replay the previous one.\n"
+                "4. location_slug - the slug of the location where the step takes place, ONLY from the location list "
+                "(empty string if there is no list).\n"
+                "5. time_of_day - the slug of the step's time of day, ONLY from the time-of-day list "
+                "(empty string if there is no list).\n"
+                "6. day - the story day number: an integer from 1, non-decreasing between steps; "
+                "if the step takes place on the same day as the previous one, use the same number.\n"
+                "The story structure is Harmon's story circle of 8 beats. Keep this order; "
+                "do not rearrange or skip beats:\n"
+                "1. Ordinary world — the protagonist in their ordinary life; convey their "
+                "dissatisfaction or desire so that there is a reason to change.\n"
+                "2. Need — the protagonist's concrete goal/desire that sets the direction of the whole story; "
+                "it is also the through-line from the story description (a mystery, a goal, coming home, "
+                "an internal conflict) that you must not drop before the finale.\n"
+                "3. Go — an event knocks the protagonist out of ordinary life into an unfamiliar situation (the inciting event).\n"
+                "4. Search — the protagonist tries to reach the goal, hits obstacles, forms relationships. "
+                "Around the middle — a turn that changes the stakes.\n"
+                "5. Find — the protagonist gets what they wanted, but in an unexpected or imperfect form.\n"
+                "6. Take — the find must be paid for: a loss, a conflict, a consequence. This is a real "
+                "obstacle/threat of failure before the climax — do not lead straight to it.\n"
+                "7. Return — the protagonist returns to the familiar situation, but changed; "
+                "the key event (a confession, a decision, a performance) plays out here.\n"
+                "8. Change — the final state of the protagonist/world and the story's takeaway; a resolution, "
+                "not a cliffhanger cut on the eve.\n"
+                "Spread the beats across steps: 8 beats → 8–12 steps. The first and last beats usually take one step each; "
+                "beats 4–6 can stretch over 2 steps. For significant characters (ally, rival, "
+                "love interest) carry a mini-arc within these beats and resolve it by beats 7–8, "
+                "not by appearing in a single scene.\n"
+                "Spread the action across place and time: do not keep the whole story in one location "
+                "unless the plot requires it; two adjacent steps must not take place in the same location "
+                "without a plot reason. Every scene within a step must match the step's place and day.\n"
+                "Build goal only on the characters from the list below; do not mention in goal characters "
+                "who are not in the list (even if they exist in the universe) — scenes with such "
+                "characters will not pass validation and will be regenerated.\n"
+                "Answer STRICTLY as JSON matching this schema:\n"
                 """
                 {
                   "roadmap": [
@@ -190,23 +191,24 @@ class RoadmapGenerator(BaseGenerator):
             ),
         }
         user_content = (
-            f"Название: {novel.title}\n"
-            f"Описание: {novel.description}\n"
-            f"Тон повествования: {novel.tone}"
+            f"Title: {novel.title}\n"
+            f"Description: {novel.description}\n"
+            f"Narrative tone: {novel.tone}"
         )
         if background_tags:
             user_content += (
-                "\n\nКаталог места и времени (выбирай только отсюда):\n"
+                "\n\nPlace and time catalog (choose only from here):\n"
                 + render_place_time_catalog(background_tags)
             )
         if characters:
-            user_content += f"\nПерсонажи:\n{render_cast(characters)}"
+            user_content += f"\nCharacters:\n{render_cast(characters)}"
             protagonist = find_protagonist(characters)
             if protagonist:
                 user_content += (
-                    f"\n\nГлавный герой: {protagonist.name} — протагонист, от чьего лица идёт история. "
-                    f"Его арка: {protagonist.arc}. "
-                    "Строй сюжет вокруг главного героя: его целей, решений, внутренних конфликтов и отношений."
+                    f"\n\nProtagonist: {protagonist.name} — the protagonist, through whose eyes the story is told. "
+                    f"Their arc: {protagonist.arc}. "
+                    "Build the plot around the protagonist: their goals, decisions, internal conflicts, and relationships."
                 )
+        system_prompt["content"] += f"\n{RUSSIAN_OUTPUT_NOTE}"
         user_prompt = {"role": "user", "content": user_content}
         return [system_prompt, user_prompt]

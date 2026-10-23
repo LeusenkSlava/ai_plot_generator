@@ -345,12 +345,12 @@ class TestGenerateWithoutUniverse:
     async def test_prompt_has_cast_and_scene(self, sut, generator, world):
         await sut.generate(scene_id=world.scene.id)
 
-        generator.assert_system_contains("сценарист интерактивных визуальных новелл")
+        generator.assert_system_contains("screenwriter for interactive visual novels")
         user_prompt = generator.last_user_prompt
-        assert "Персонажи новеллы:" in user_prompt
+        assert "Novel characters:" in user_prompt
         assert "Алиса" in user_prompt
         assert "Боб" in user_prompt
-        assert "Участники сцены:" in user_prompt
+        assert "Scene participants:" in user_prompt
         assert world.scene.title in user_prompt
         assert world.scene.description in user_prompt
 
@@ -358,8 +358,8 @@ class TestGenerateWithoutUniverse:
         await sut.generate(scene_id=world.scene.id)
 
         user_prompt = generator.last_user_prompt
-        assert "Каталог ассетов" not in user_prompt
-        assert "Фоны (background_base_tag" not in user_prompt
+        assert "Asset catalog" not in user_prompt
+        assert "Backgrounds (background_base_tag" not in user_prompt
 
     async def test_llm_called_exactly_once(self, sut, generator, world):
         await sut.generate(scene_id=world.scene.id)
@@ -370,8 +370,8 @@ class TestGenerateWithoutUniverse:
         await sut.generate(scene_id=world.scene.id)
 
         generator.assert_system_contains(
-            "мыслью-выводом",
-            "финальная реплика сцены",
+            "concluding thought",
+            "scene's final line",
         )
 
     async def test_full_cast_in_head_participants_separate(
@@ -395,11 +395,11 @@ class TestGenerateWithoutUniverse:
         await sut.generate(scene_id=scene.id)
 
         user_prompt = generator.last_user_prompt
-        assert "Персонажи новеллы:" in user_prompt
+        assert "Novel characters:" in user_prompt
         # Боба нет в сцене, но он остаётся в полном касте в голове промпта.
         assert "Боб" in user_prompt
-        assert "Участники сцены: Алиса" in user_prompt
-        assert "Участники сцены: Алиса, Боб" not in user_prompt
+        assert "Scene participants: Алиса" in user_prompt
+        assert "Scene participants: Алиса, Боб" not in user_prompt
 
 
 # ---------------------------------------------------------------------------
@@ -456,8 +456,8 @@ class TestGenerateWithUniverse:
         await sut.generate(scene_id=world.scene.id)
 
         user_prompt = generator.last_user_prompt
-        assert "Каталог ассетов" in user_prompt
-        assert "Фоны (background_base_tag" in user_prompt
+        assert "Asset catalog" in user_prompt
+        assert "Backgrounds (background_base_tag" in user_prompt
         generator.assert_system_contains(
             "background_base_tag",
             "sprite_slug",
@@ -496,7 +496,7 @@ class TestPromptContext:
         )
 
         user_prompt = generator.last_user_prompt
-        assert "Изложение истории" in user_prompt
+        assert "Story so far" in user_prompt
         assert "Алиса потеряла брата в лесу." in user_prompt
 
     async def test_previous_lines_in_prompt(self, sut, generator, world):
@@ -508,7 +508,7 @@ class TestPromptContext:
         await sut.generate(scene_id=world.scene.id, previous_lines=previous)
 
         user_prompt = generator.last_user_prompt
-        assert "Последние реплики предыдущей сцены" in user_prompt
+        assert "Last lines of the previous scene" in user_prompt
         assert "Алиса: Где он?" in user_prompt
         assert "Боб: Не знаю." in user_prompt
 
@@ -522,16 +522,16 @@ class TestPromptContext:
         await sut.generate(scene_id=world.scene.id)
 
         user_prompt = generator.last_user_prompt
-        assert "Текущие наряды персонажей" in user_prompt
+        assert "Current character outfits" in user_prompt
         assert "Алиса: outfit_tag red-dress" in user_prompt
 
     async def test_no_context_by_default(self, sut, generator, world):
         await sut.generate(scene_id=world.scene.id)
 
         user_prompt = generator.last_user_prompt
-        assert "Изложение истории" not in user_prompt
-        assert "Последние реплики предыдущей сцены" not in user_prompt
-        assert "Текущие наряды персонажей" not in user_prompt
+        assert "Story so far" not in user_prompt
+        assert "Last lines of the previous scene" not in user_prompt
+        assert "Current character outfits" not in user_prompt
 
 
 # ---------------------------------------------------------------------------

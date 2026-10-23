@@ -8,6 +8,7 @@ from src.core.novels.models import Novel
 from src.core.novels.services.crud import NovelService
 from src.core.novels.services.generation.generators.base import BaseGenerator
 from src.core.novels.services.generation.prompts.context import render_all
+from src.core.novels.services.generation.prompts.text import RUSSIAN_OUTPUT_NOTE
 
 logger = logging.getLogger(__name__)
 
@@ -56,16 +57,17 @@ class NovelGenerator(BaseGenerator):
     ) -> list[dict]:
         """Создает промт для создания новеллы на основе пользовательского промта."""
         system_content = (
-            "Ты сценарист интерактивных визуальных новелл. "
-            "По тегам и описанию от пользователя создай творческую основу истории "
-            "для дальнейшей генерации. " + Novel.llm_json_instruction()
+            "You are a screenwriter for interactive visual novels. "
+            "Based on the user's tags and description, create the creative foundation "
+            "of the story for further generation. " + Novel.llm_json_instruction()
         )
         if codex_context:
             system_content += (
-                "\nИстория происходит в существующей вселенной из базы знаний. "
-                "Используй ТОЛЬКО этих персонажей и локации, ничего не выдумывай:\n"
+                "\nThe story takes place in an existing universe from the knowledge base. "
+                "Use ONLY these characters and locations, do not invent anything:\n"
                 + codex_context
             )
+        system_content += f"\n{RUSSIAN_OUTPUT_NOTE}"
 
         return [
             {"role": "system", "content": system_content},

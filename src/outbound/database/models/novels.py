@@ -16,6 +16,7 @@ class CharacterModel(BaseModel):
     arc: Mapped[str] = mapped_column(String, nullable=False)
     voice_notes: Mapped[str] = mapped_column(String, nullable=False)
     codex_character_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    gender: Mapped[str | None] = mapped_column(String, nullable=True)
     is_protagonist: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False
     )

@@ -294,9 +294,9 @@ class TestScenePlaceTime:
         await sut.generate(roadmap.id)
 
         user_prompt = generator.last_user_prompt
-        assert "Место и время шага" in user_prompt
+        assert "Step place and time" in user_prompt
         assert "aidpost" in user_prompt
-        assert "день 3" in user_prompt
+        assert "day 3" in user_prompt
 
 
 def _previous_scene(title: str, character_ids: list[int]) -> Scene:

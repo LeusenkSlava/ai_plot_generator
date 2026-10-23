@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from src.core.novels.exceptions import GenerationError
 from src.core.novels.interfaces.generation import GeneratorProtocol
 from src.core.novels.models import Roadmap, Scene
+from src.core.novels.services.generation.prompts.text import RUSSIAN_OUTPUT_NOTE
 
 from .base import BaseGenerator
 
@@ -95,20 +96,20 @@ class SceneRoadmapValidator(BaseGenerator):
         system_prompt = {
             "role": "system",
             "content": (
-                "Ты редактор интерактивной визуальной новеллы. Проверь, соответствует ли "
-                "сгенерированная сцена текущему шагу роадмапа ПО СМЫСЛУ. Оцени строго по трём осям:\n"
-                "1. theme_match — тема/событие: сцена продвигает сюжет к цели шага "
-                "(к тому, что должно произойти на этом шаге), а не переигрывает уже пройденное "
-                "и не выполняет цель другого шага;\n"
-                "2. location_match — место: сцена происходит в локации, которую задаёт шаг "
-                "(или логично продолжает её), а не в другой локации;\n"
-                "3. time_match — время: сцена происходит в том дне/этапе, который задаёт шаг "
-                "(или логично следует из изложения истории), а не уходит в другой день/этап.\n"
-                "Локация и день шага и сцены заданы явно; если они различаются — по "
-                "соответствующей оси ставь false. Если место или время у шага не заданы — "
-                "по этой оси ставь true, не выдумывай расхождение. Считай расхождением "
-                "только явное несоответствие.\n"
-                "Отвечай СТРОГО в формате JSON, соответствующего этой схеме:\n"
+                "You are the editor of an interactive visual novel. Check whether the "
+                "generated scene matches the current roadmap step BY MEANING. Judge strictly on three axes:\n"
+                "1. theme_match — theme/event: the scene moves the plot toward the step's goal "
+                "(toward what should happen in this step), rather than replaying what already passed "
+                "or fulfilling the goal of another step;\n"
+                "2. location_match — place: the scene takes place in the location set by the step "
+                "(or logically continues it), not in another location;\n"
+                "3. time_match — time: the scene takes place in the day/stage set by the step "
+                "(or logically follows from the story recap), rather than drifting into another day/stage.\n"
+                "The step's and scene's location and day are set explicitly; if they differ — set false "
+                "on the corresponding axis. If the step's place or time is not set — "
+                "set true on that axis, do not invent a mismatch. Treat only an explicit "
+                "mismatch as a discrepancy.\n"
+                "Answer STRICTLY as JSON matching this schema:\n"
                 """
                 {
                   "theme_match": boolean,
@@ -117,27 +118,28 @@ class SceneRoadmapValidator(BaseGenerator):
                   "reason": string
                 }
                 """
-                "\nreason — короткое объяснение расхождения по осям, где есть расхождение; "
-                "пустая строка, если всё совпадает."
+                "\nreason — a short explanation of the discrepancy on the axes where there is one; "
+                "empty string if everything matches."
             ),
         }
         user_content = (
-            f"Шаг роадмапа: {roadmap.title}\n"
-            f"Цель шага: {roadmap.goal}\n"
-            f"Локация шага: {roadmap.location_slug or 'не задана'}\n"
-            f"Время суток шага: {roadmap.time_of_day or 'не задано'}\n"
-            f"День шага: {roadmap.day if roadmap.day is not None else 'не задан'}"
+            f"Roadmap step: {roadmap.title}\n"
+            f"Step goal: {roadmap.goal}\n"
+            f"Step location: {roadmap.location_slug or 'not set'}\n"
+            f"Step time of day: {roadmap.time_of_day or 'not set'}\n"
+            f"Step day: {roadmap.day if roadmap.day is not None else 'not set'}"
         )
         if story_context:
             user_content += (
-                f"\n\nИзложение истории на данный момент (день/этап и место действия):\n"
+                f"\n\nStory so far (day/stage and place of action):\n"
                 f"{story_context}"
             )
         user_content += (
-            f"\n\nСцена: {scene.title}\n"
-            f"Описание сцены: {scene.description}\n"
-            f"Локация сцены: {scene.location_slug or 'не задана'}\n"
-            f"Время суток сцены: {scene.time_of_day or 'не задано'}\n"
-            f"День сцены: {scene.day if scene.day is not None else 'не задан'}"
+            f"\n\nScene: {scene.title}\n"
+            f"Scene description: {scene.description}\n"
+            f"Scene location: {scene.location_slug or 'not set'}\n"
+            f"Scene time of day: {scene.time_of_day or 'not set'}\n"
+            f"Scene day: {scene.day if scene.day is not None else 'not set'}"
         )
+        system_prompt["content"] += f"\n{RUSSIAN_OUTPUT_NOTE}"
         return [system_prompt, {"role": "user", "content": user_content}]

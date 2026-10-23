@@ -310,16 +310,16 @@ class SceneAssetService:
                 )
                 or "-"
             )
-            lines.append("Фоны (background_base_tag + background_modifier_tags):")
-            lines.append(f"  локации (ровно один background_base_tag): {base}")
+            lines.append("Backgrounds (background_base_tag + background_modifier_tags):")
+            lines.append(f"  locations (exactly one background_base_tag): {base}")
             lines.append(
-                f"  уточнения (0 и более background_modifier_tags): {modifiers}"
+                f"  modifiers (0 or more background_modifier_tags): {modifiers}"
             )
         for character in characters:
             sprites = assets.sprites.get(character.id)
             if not sprites:
                 continue
-            lines.append(f"Спрайты (sprite_slug) персонажа {character.name}:")
+            lines.append(f"Sprites (sprite_slug) of character {character.name}:")
             for slug, sa in sprites.items():
                 lines.append(f"- {slug}: {_short(sa.sprite.description)}")
             tags = assets.emotion_tags.get(character.id)
@@ -328,15 +328,15 @@ class SceneAssetService:
                 modifiers = (
                     ", ".join(f"{t.slug}={t.name}" for t in tags.modifiers) or "-"
                 )
-                lines.append(f"Эмоции персонажа {character.name}:")
-                lines.append(f"  базовые (emotion_base_tag): {base}")
-                lines.append(f"  модификаторы (emotion_modifier_tags): {modifiers}")
+                lines.append(f"Emotions of character {character.name}:")
+                lines.append(f"  base (emotion_base_tag): {base}")
+                lines.append(f"  modifiers (emotion_modifier_tags): {modifiers}")
             outfit_tags = assets.outfit_tags.get(character.id)
             if outfit_tags:
                 styles = (
                     ", ".join(f"{t.slug}={t.name}" for t in outfit_tags) or "-"
                 )
                 lines.append(
-                    f"Одежда персонажа {character.name} (outfit_tag): {styles}"
+                    f"Outfits of character {character.name} (outfit_tag): {styles}"
                 )
         return "\n".join(lines)

@@ -42,6 +42,7 @@ class CodexCharacter:
     name: str
     description: str
     speech_style: dict | None = None
+    gender: str | None = None
     tags: list[Tag] = field(default_factory=list)
 
 

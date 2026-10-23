@@ -31,8 +31,8 @@ class LLMGeneratedModel:
             indent=2,
         )
         return (
-            "Создай поля:\n" + lines + "\n"
-            "Отвечай СТРОГО в формате JSON по схеме:\n" + json_shape
+            "Return these fields:\n" + lines + "\n"
+            "Answer STRICTLY as JSON matching this schema:\n" + json_shape
         )
 
     @classmethod

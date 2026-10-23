@@ -18,6 +18,8 @@ class Character:
     # id персонажа в Codex; только для новелл с universe_id
     codex_character_id: int | None = None
 
+    gender: str | None = None
+
     is_protagonist: bool = False
 
 
@@ -83,10 +85,10 @@ class Novel(LLMGeneratedModel):
     universe_id: int | None = None
 
     _LLM_FIELDS: ClassVar[dict[str, str]] = {
-        "title": "короткое, цепляющее название",
-        "public_description": "описание для пользователя, БЕЗ спойлеров",
-        "description": "главное описание истории, по нему будет генерироваться сюжет",
-        "tone": "тон и стиль повествования",
+        "title": "short, catchy title",
+        "public_description": "user-facing description, NO spoilers",
+        "description": "main description of the story; the plot will be generated from it",
+        "tone": "tone and narrative style",
     }
 
     @classmethod

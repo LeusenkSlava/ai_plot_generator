@@ -1,5 +1,9 @@
 """Вспомогательные функции форматирования текста для промптов."""
 
+RUSSIAN_OUTPUT_NOTE = (
+    "Write all generated content in Russian; write proper names in Russian."
+)
+
 
 def single_line(text: str) -> str:
     """Схлопывает переносы строк и повторные пробелы в одну строку.
