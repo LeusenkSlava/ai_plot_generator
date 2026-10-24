@@ -36,6 +36,9 @@ class DeepSeekSettings(BaseSettings):
     API_KEY: str
     BASE_URL: str = "https://api.deepseek.com"
     TEMPERATURE: float = 0.9
+    # Отдельная температура для диалогов: выше — разнообразнее и живее реплики.
+    # 1.5 даёт слишком частый невалидный JSON, поэтому держим в безопасном диапазоне.
+    DIALOGUE_TEMPERATURE: float = 1.0
 
     NOVEL_REASONING_EFFORT: str = "high"
     CHARACTER_REASONING_EFFORT: str = "low"
@@ -48,6 +51,7 @@ class DeepSeekSettings(BaseSettings):
     # ~40-50% выходных токенов.
     CHARACTER_THINK: bool = False
     ROADMAP_THINK: bool = True
+    DIALOGUE_THINK: bool = True
 
     SCENE_VALIDATION_RETRIES: int = 3
 

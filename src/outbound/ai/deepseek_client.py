@@ -55,13 +55,14 @@ class DeepSeekGenerator:
         prompt: list,
         think: bool = True,
         reasoning_effort: str | None = None,
+        temperature: float | None = None,
     ) -> dict:
         started = time.monotonic()
         request = {
             "model": MODEL,
             "messages": prompt,
             "response_format": {"type": "json_object"},
-            "temperature": self._temperature,
+            "temperature": temperature if temperature is not None else self._temperature,
             "extra_body": {"thinking": {"type": "enabled" if think else "disabled"}},
         }
 

@@ -150,6 +150,8 @@ def build_novel_generators(
             dialogue_line_service=services.dialogue_line,
             generator=generator,
             reasoning_effort=settings.deepseek.DIALOGUE_REASONING_EFFORT,
+            think=settings.deepseek.DIALOGUE_THINK,
+            temperature=settings.deepseek.DIALOGUE_TEMPERATURE,
         ),
         story_context=StoryContextGenerator(
             novel_service=services.novel,

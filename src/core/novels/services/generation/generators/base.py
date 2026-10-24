@@ -17,11 +17,15 @@ class BaseGenerator(ABC):
         prompt: list[dict],
         think: bool = True,
         reasoning_effort: str | None = None,
+        temperature: float | None = None,
     ) -> dict:
         try:
             with llm_step(type(self).__name__):
                 return await self._generator.generate(
-                    prompt, think=think, reasoning_effort=reasoning_effort
+                    prompt,
+                    think=think,
+                    reasoning_effort=reasoning_effort,
+                    temperature=temperature,
                 )
         except Exception as e:
             logger.error(f"{type(self).__name__}.generate: {e}")

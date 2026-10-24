@@ -19,8 +19,7 @@ from src.core.novels.services.generation.prompts.text import RUSSIAN_OUTPUT_NOTE
 logger = logging.getLogger(__name__)
 
 MAX_KEY_FACTS = 12
-# Единый источник лимита стоп-фраз: подставляется и в код, и в промпт,
-# чтобы рассинхрон («до 5» в промпте при лимите 10) не повторялся.
+# Максимум повторяющихся фраз (n-грамм), которые код кладёт в «не повторять дословно».
 MAX_USED_PHRASES = 5
 # Минимальный возраст факта (в итерациях apply), после которого его можно удалять.
 # Факт, добавленный в текущей или предыдущей итерации, удалять нельзя — иначе
@@ -59,45 +58,56 @@ def _cast_name_tokens(names: list[str]) -> set[str]:
     return tokens
 
 
-def _valid_used_phrase(phrase: str, name_tokens: set[str]) -> bool:
-    """Стоп-фраза валидна, если в ней ≥2 слова и нет имени персонажа из каста.
+def _word_tokens(text: str) -> list[str]:
+    """Слова реплики после нормализации — для извлечения n-грамм."""
+    return [t for t in _normalize(text).split() if t]
 
-    Однословные междометия/ремарки («наверное», «пионер») и имена («Ольга
-    Дмитриевна», «Ульяна не глупая») отсеиваются. Проверка языко-независима:
-    счёт по пробелам и точное совпадение токенов имён.
+
+def extract_used_phrases(
+    lines: list[str], names: list[str], max_phrases: int = MAX_USED_PHRASES
+) -> list[str]:
+    """Повторяющиеся словосочетания из прошлых реплик — для блока «не повторять дословно».
+
+    Считаются триграммы и биграммы, встретившиеся минимум в двух репликах. Имена
+    персонажей и всё, что содержит имя, отсеивается, чтобы не запрещать упоминание
+    героев. Приоритет — более длинные и частые фразы; короткая фраза, поглощённая
+    длинной, не дублируется.
     """
-    tokens = _normalize(phrase).split()
-    if len(tokens) < 2:
-        return False
-    if any(token in name_tokens for token in tokens):
-        return False
-    return True
+    name_tokens = _cast_name_tokens(names)
+    line_counts: dict[str, int] = {}
+    for line in lines:
+        tokens = _word_tokens(line)
+        grams: set[str] = set()
+        for n in (3, 2):
+            for i in range(len(tokens) - n + 1):
+                gram = tuple(tokens[i : i + n])
+                if any(token in name_tokens for token in gram):
+                    continue
+                grams.add(" ".join(gram))
+        for phrase in grams:
+            line_counts[phrase] = line_counts.get(phrase, 0) + 1
 
-
-def _filter_used_phrases(phrases: list[str], name_tokens: set[str]) -> list[str]:
-    """Оставляет только валидные стоп-фразы; невалидные отбрасывает."""
-    kept: list[str] = []
-    for phrase in phrases:
-        phrase = phrase.strip()
-        if not phrase:
+    repeated = [p for p, count in line_counts.items() if count >= 2]
+    repeated.sort(key=lambda p: (-len(p.split()), -line_counts[p]))
+    result: list[str] = []
+    for phrase in repeated:
+        if len(result) >= max_phrases:
+            break
+        if any(phrase in kept for kept in result):
             continue
-        if _valid_used_phrase(phrase, name_tokens):
-            kept.append(phrase)
-    return kept
+        result.append(phrase)
+    return result
 
 
 @dataclass
 class StoryState:
     """Изложение истории после сцены. Хранится в scenes.story_context как JSON."""
 
-    summary: str = ""
     key_facts: list[str] = field(default_factory=list)
     # возраст каждого факта в итерациях apply (выравнен с key_facts)
     fact_ages: list[int] = field(default_factory=list)
     # имя персонажа -> {"outfit": ..., "state": ...}
     characters: dict[str, dict[str, str]] = field(default_factory=dict)
-    # фразы-мотивы, которые уже звучали и не должны повторяться дословно дальше
-    used_phrases: list[str] = field(default_factory=list)
 
     @classmethod
     def load(cls, raw: str | None) -> "StoryState":
@@ -106,8 +116,8 @@ class StoryState:
         try:
             data = json.loads(raw)
         except ValueError:
-            # Изложение в старом формате — просто текст
-            return cls(summary=raw)
+            # Изложение в старом формате — просто текст; держим его как один факт.
+            return cls(key_facts=[raw])
         key_facts = list(data.get("key_facts") or [])
         raw_ages = data.get("fact_ages")
         if raw_ages is None:
@@ -116,25 +126,20 @@ class StoryState:
         else:
             fact_ages = [int(a) for a in raw_ages]
         return cls(
-            summary=data.get("summary") or "",
             key_facts=key_facts,
             fact_ages=fact_ages,
             characters=dict(data.get("characters") or {}),
-            used_phrases=list(data.get("used_phrases") or []),
         )
 
     def dump(self) -> str:
         return json.dumps(asdict(self), ensure_ascii=False)
 
     def apply(self, delta: dict) -> list[tuple[int, str]]:
-        """Применяет изменения от LLM: новое summary, удалённые/добавленные факты, изменившихся персонажей.
+        """Применяет изменения от LLM: удалённые/добавленные факты, изменившихся персонажей.
 
         Возвращает список (номер, текст) фактов, удаление которых было отклонено,
         потому что факт слишком свежий (возраст < MIN_FACT_AGE_TO_REMOVE).
         """
-        if summary := (delta.get("summary") or "").strip():
-            self.summary = summary
-
         removed = {i for i in delta.get("remove_facts") or [] if isinstance(i, int)}
         self._align_ages()
         protected: list[tuple[int, str]] = []
@@ -159,14 +164,6 @@ class StoryState:
             kept_facts, kept_ages, delta.get("add_facts") or []
         )
 
-        for phrase in delta.get("used_phrases") or []:
-            phrase = phrase.strip()
-            if not phrase:
-                continue
-            if any(_normalize(phrase) == _normalize(p) for p in self.used_phrases):
-                continue
-            self.used_phrases.append(phrase)
-        self.used_phrases = self.used_phrases[-MAX_USED_PHRASES:]
         for c in delta.get("characters") or []:
             if not c.get("name"):
                 continue
@@ -234,8 +231,6 @@ class StoryState:
     def render(self, numbered: bool = False) -> str:
         """Текст изложения для промтов."""
         parts = []
-        if self.summary:
-            parts.append(f"Summary:\n{self.summary}")
         if self.key_facts:
             parts.append(
                 "Important plot facts:\n"
@@ -253,16 +248,7 @@ class StoryState:
                     for name, c in self.characters.items()
                 )
             )
-        if self.used_phrases:
-            parts.append(
-                "Phrases already used (do not repeat them verbatim in later scenes):\n"
-                + "\n".join(f"- {p}" for p in self.used_phrases)
-            )
         return "\n\n".join(parts)
-
-    def render_summary(self) -> str | None:
-        """Только краткое содержание — для промптов, которым не нужны факты/фразы."""
-        return self.summary or None
 
 
 def render_story_context(raw: str | None) -> str | None:
@@ -270,16 +256,11 @@ def render_story_context(raw: str | None) -> str | None:
     return StoryState.load(raw).render() or None
 
 
-def render_story_summary(raw: str | None) -> str | None:
-    """scenes.story_context -> только summary (для валидатора шага)."""
-    return StoryState.load(raw).render_summary()
-
-
 class StoryContextGenerator(BaseGenerator):
     """Изложение истории после сцены.
 
-    LLM возвращает только изменения относительно предыдущего изложения (новое summary,
-    добавленные/удалённые факты, изменившиеся персонажи), склеиваем их в коде.
+    LLM возвращает только изменения относительно предыдущего изложения
+    (добавленные/удалённые факты, изменившихся персонажей), склеиваем их в коде.
     Результат сохраняется в сцену JSON'ом (StoryState), генерация следующей сцены берёт его.
     """
 
@@ -314,21 +295,17 @@ class StoryContextGenerator(BaseGenerator):
 
         characters = await self._character_service.list_by_novel(novel.id) or []
         lines = await self._dialogue_line_service.list_by_scene(scene.id)
-        name_tokens = _cast_name_tokens([c.name for c in characters])
 
         state = StoryState.load(previous_context)
         prompt = self.__create_prompt(novel, scene, characters, lines, state)
 
-        # Один вызов LLM: изложение + фильтр стоп-фраз + склейка фактов в коде.
-        # Смысловая дедупликация фактов и LLM-проверка противоречий убраны как
-        # нерентабельные: проверка противоречий ловила ~1 случай на прогон при 52
-        # микровызовах, а дубли гасит __merge_facts (точное/вложенное совпадение).
+        # Один вызов LLM: добавление/удаление фактов + изменившиеся персонажи,
+        # склейка фактов в коде. Смысловая дедупликация фактов и LLM-проверка
+        # противоречий убраны как нерентабельные: проверка противоречий ловила
+        # ~1 случай на прогон при 52 микровызовах, а дубли гасит __merge_facts
+        # (точное/вложенное совпадение).
         delta = await self._generate(prompt, think=False)
         delta = dict(delta)
-        # Валидация стоп-фраз: ≥2 слов и без имён персонажей (Задача 9).
-        delta["used_phrases"] = _filter_used_phrases(
-            delta.get("used_phrases") or [], name_tokens
-        )
 
         protected = state.apply(delta)
 
@@ -370,9 +347,6 @@ class StoryContextGenerator(BaseGenerator):
                 "You are the editor of an interactive visual novel and maintain the story recap "
                 "from which the following scenes will be generated. "
                 "Based on the previous recap and the new scene's dialogue, return ONLY the changes:\n"
-                "- summary - a new brief recap of the whole story including the scene, no more than 5 sentences. "
-                "Rewrite compactly, without repeating the previous recap verbatim, and do not retell "
-                "the same thing from scene to scene;\n"
                 "- remove_facts - the numbers of facts from the previous recap that are outdated, "
                 "no longer important to the plot, or absorbed by new ones;\n"
                 "- add_facts - new facts from this scene that matter for the plot going forward "
@@ -383,14 +357,10 @@ class StoryContextGenerator(BaseGenerator):
                 f"No more than {MAX_KEY_FACTS} facts should remain after the changes;\n"
                 "- characters - only characters for whom something changed or who appear for the first time: "
                 f"{outfit_instruction} "
-                "state - physical and emotional state, up to 80 characters. Empty string means no changes;\n"
-                f"- used_phrases - up to {MAX_USED_PHRASES} motif phrases (2 or more words, no character names) "
-                "that have already been used in the story more than once and must not be repeated "
-                "verbatim in later scenes.\n"
+                "state - physical and emotional state, up to 80 characters. Empty string means no changes.\n"
                 "Answer STRICTLY as JSON matching this schema:\n"
                 """
                 {
-                  "summary": string,
                   "remove_facts": [int],
                   "add_facts": [string],
                   "characters": [
@@ -399,8 +369,7 @@ class StoryContextGenerator(BaseGenerator):
                       "outfit": string,
                       "state": string
                     }
-                  ],
-                  "used_phrases": [string]
+                  ]
                 }
                 """
             ),

@@ -21,6 +21,7 @@ class FakeGenerator:
         self.calls: list[list[dict]] = []
         self.think_flags: list[bool] = []
         self.efforts: list[str | None] = []
+        self.temperatures: list[float | None] = []
 
     # ---------- настройка ----------
 
@@ -48,10 +49,12 @@ class FakeGenerator:
         prompt: list[dict],
         think: bool = True,
         reasoning_effort: str | None = None,
+        temperature: float | None = None,
     ) -> dict:
         self.calls.append(prompt)
         self.think_flags.append(think)
         self.efforts.append(reasoning_effort)
+        self.temperatures.append(temperature)
 
         if self._errors:
             raise self._errors.pop(0)

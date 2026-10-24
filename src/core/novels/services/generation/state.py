@@ -98,3 +98,7 @@ class NovelState:
     @property
     def previous_dialogue_lines(self) -> list[DialogueLine]:
         return self._dialogue_lines[-PREVIOUS_LINES_LIMIT:]
+
+    @property
+    def dialogue_lines(self) -> list[DialogueLine]:
+        return self._dialogue_lines

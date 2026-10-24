@@ -19,7 +19,6 @@ from src.core.novels.services.generation.generators.scene import SceneGenerator
 from src.core.novels.services.generation.generators.story_context import (
     StoryContextGenerator,
     render_story_context,
-    render_story_summary,
 )
 from src.core.novels.services.generation.state import NextSceneSlot, NovelState
 
@@ -90,13 +89,11 @@ class SceneContinuationService:
 
     async def _run_pipeline(self, slot: NextSceneSlot, state: NovelState) -> Scene:
         story_text = render_story_context(state.last_story_context)
-        story_summary = render_story_summary(state.last_story_context)
 
         scene = await self._scene_generator.generate(
             slot.roadmap.id,
             previous_scenes=state.last_scenes,
             story_context=story_text,
-            story_summary=story_summary,
             order=slot.order,
         )
 
@@ -107,7 +104,13 @@ class SceneContinuationService:
             scene.id,
             previous_lines=state.previous_dialogue_lines,
             story_context=story_text,
+            all_lines=state.dialogue_lines,
         )
+
+        # После финальной сцены контекст некому читать: его берёт только генерация
+        # следующей сцены, а её не будет. Пропускаем вызов, чтобы не платить за мёртвый контекст.
+        if scene.is_final_for_novel:
+            return scene
 
         await self._story_context_generator.generate(
             scene.id, previous_context=state.last_story_context

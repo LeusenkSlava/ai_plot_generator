@@ -1,28 +1,18 @@
-import pytest
-
 from src.core.novels.models import Novel, Scene
 from src.core.novels.services.generation.generators.story_context import (
     MAX_KEY_FACTS,
     MAX_USED_PHRASES,
     StoryContextGenerator,
     StoryState,
-    _cast_name_tokens,
-    _filter_used_phrases,
-    _valid_used_phrase,
+    extract_used_phrases,
 )
 
 
 class TestStoryStateApply:
-    def test_apply_summary_and_facts(self):
+    def test_apply_adds_facts(self):
         state = StoryState()
-        state.apply(
-            {
-                "summary": "Сюжет сдвинулся.",
-                "add_facts": ["Факт один", "Факт два"],
-            }
-        )
+        state.apply({"add_facts": ["Факт один", "Факт два"]})
 
-        assert state.summary == "Сюжет сдвинулся."
         assert state.key_facts == ["Факт один", "Факт два"]
 
     def test_remove_facts_by_number(self):
@@ -108,44 +98,28 @@ class TestStoryStateFreshFactProtection:
         assert loaded.apply({"remove_facts": [1]}) == [(1, "Факт")]
 
 
-class TestUsedPhrasesValidation:
-    def test_single_word_rejected(self):
-        tokens = _cast_name_tokens(["Семён", "Виола"])
-
-        assert _valid_used_phrase("наверное", tokens) is False
-        assert _valid_used_phrase("пионер", tokens) is False
-
-    def test_two_or_more_words_accepted(self):
-        tokens = _cast_name_tokens(["Семён", "Виола"])
-
-        assert _valid_used_phrase("не ходи туда", tokens) is True
-
-    def test_phrase_with_cast_name_rejected(self):
-        tokens = _cast_name_tokens(["Семён", "Ольга Дмитриевна"])
-
-        assert _valid_used_phrase("Ольга Дмитриевна", tokens) is False
-        assert _valid_used_phrase("Ульяна не глупая", _cast_name_tokens(["Ульяна"])) is False
-
-    def test_filter_drops_invalid(self):
-        tokens = _cast_name_tokens(["Семён", "Виола", "Ольга Дмитриевна"])
-
-        result = _filter_used_phrases(
-            ["наверное", "не ходи туда", "Ольга Дмитриевна"], tokens
+class TestExtractUsedPhrases:
+    def test_repeated_phrase_found(self):
+        phrases = extract_used_phrases(
+            ["Не ходи туда без меня", "Не ходи туда один"], ["Семён"]
         )
 
-        assert result == ["не ходи туда"]
+        assert "не ходи туда" in phrases
 
-    def test_cast_name_tokens_split_multiword(self):
-        tokens = _cast_name_tokens(["Ольга Дмитриевна"])
+    def test_single_occurrence_ignored(self):
+        assert extract_used_phrases(["Уникальная фраза здесь"], ["Семён"]) == []
 
-        assert tokens == {"ольга", "дмитриевна"}
+    def test_phrase_with_cast_name_excluded(self):
+        phrases = extract_used_phrases(["Семён пошёл", "Семён пошёл"], ["Семён"])
 
+        assert phrases == []
 
-class TestUsedPhrasesLimit:
     def test_limit_is_five(self):
         assert MAX_USED_PHRASES == 5
 
-    def test_prompt_uses_constant(self):
+
+class TestStoryContextPrompt:
+    def test_prompt_has_no_summary_or_used_phrases(self):
         novel = Novel(
             id=1,
             created_at=None,
@@ -169,43 +143,27 @@ class TestUsedPhrasesLimit:
             novel, scene, [], [], StoryState()
         )
 
-        assert f"up to {MAX_USED_PHRASES} motif phrases" in prompt[0]["content"]
-
-
-class TestStoryStateUsedPhrases:
-    def test_used_phrases_collected(self):
-        state = StoryState()
-        state.apply({"used_phrases": ["Не ходи туда без меня"]})
-
-        assert state.used_phrases == ["Не ходи туда без меня"]
-
-    def test_used_phrases_deduplicated(self):
-        state = StoryState(used_phrases=["Не ходи туда без меня"])
-        state.apply({"used_phrases": ["не ходи туда без меня"]})
-
-        assert state.used_phrases == ["Не ходи туда без меня"]
-
-    def test_used_phrases_trimmed_to_max(self):
-        state = StoryState(used_phrases=[f"Фраза {i}" for i in range(MAX_USED_PHRASES)])
-        state.apply({"used_phrases": ["Новая фраза"]})
-
-        assert len(state.used_phrases) == MAX_USED_PHRASES
-        assert state.used_phrases[-1] == "Новая фраза"
+        content = prompt[0]["content"]
+        assert "summary" not in content.lower()
+        assert "used_phrases" not in content
+        assert '"add_facts"' in content
+        assert '"remove_facts"' in content
+        assert '"characters"' in content
 
 
 class TestStoryStateRender:
-    def test_render_includes_used_phrases(self):
+    def test_render_facts_and_characters_only(self):
         state = StoryState(
-            summary="Кратко.",
             key_facts=["Факт"],
-            used_phrases=["Не ходи туда без меня"],
+            characters={"Лена": {"outfit": "пионерская форма"}},
         )
 
         rendered = state.render()
 
-        assert "Summary" in rendered
-        assert "Phrases already used" in rendered
-        assert "Не ходи туда без меня" in rendered
+        assert "Important plot facts" in rendered
+        assert "Character states" in rendered
+        assert "Summary" not in rendered
+        assert "Phrases already used" not in rendered
 
     def test_render_numbered_facts(self):
         state = StoryState(key_facts=["a", "b"])
@@ -218,20 +176,16 @@ class TestStoryStateRender:
     def test_load_old_plain_text(self):
         state = StoryState.load("Просто текст старого формата")
 
-        assert state.summary == "Просто текст старого формата"
-        assert state.key_facts == []
+        assert state.key_facts == ["Просто текст старого формата"]
+        assert state.characters == {}
 
     def test_dump_roundtrip(self):
         state = StoryState(
-            summary="s",
             key_facts=["f"],
             characters={"Лена": {"outfit": "пионерская форма"}},
-            used_phrases=["p"],
         )
 
         loaded = StoryState.load(state.dump())
 
-        assert loaded.summary == "s"
         assert loaded.key_facts == ["f"]
         assert loaded.characters == {"Лена": {"outfit": "пионерская форма"}}
-        assert loaded.used_phrases == ["p"]

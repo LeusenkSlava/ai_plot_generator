@@ -7,6 +7,7 @@ class GeneratorProtocol(Protocol):
         prompt: list,
         think: bool = True,
         reasoning_effort: str | None = None,
+        temperature: float | None = None,
     ) -> dict:
         """Возвращает (title, description) на основе пожелания пользователя."""
         ...

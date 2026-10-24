@@ -50,12 +50,11 @@ class SceneGenerator(BaseGenerator):
         roadmap_id: int,
         previous_scenes: list[Scene] | None = None,
         story_context: str | None = None,
-        story_summary: str | None = None,
         order: int | None = None,
     ) -> Scene:
         """Следующая сцена шага роадмапа. previous_scenes — уже сыгранные сцены новеллы для связности,
-        story_context — изложение истории после предыдущей сцены (полный рендер для промпта сцены),
-        story_summary — только краткое содержание для валидатора (дёшевле). order — сквозной номер сцены в новелле.
+        story_context — изложение истории после предыдущей сцены (рендер фактов и персонажей для промпта сцены
+        и валидатора). order — сквозной номер сцены в новелле.
         """
         roadmap = await self._roadmap_service.get(roadmap_id)
         if not roadmap:
@@ -123,7 +122,7 @@ class SceneGenerator(BaseGenerator):
                 verdict = await self._validator.validate(
                     roadmap=roadmap,
                     scene=scene,
-                    story_context=story_summary,
+                    story_context=story_context,
                 )
             except GenerationError as e:
                 # Не удалось собрать участников (неизвестное имя) или сверка упала

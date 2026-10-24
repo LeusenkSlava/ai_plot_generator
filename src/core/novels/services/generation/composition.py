@@ -48,6 +48,9 @@ class NovelCompositionService:
                 if scene.needs_review:
                     return novel
                 await self._dialogue_generator.generate(scene.id)
+                # Для финальной сцены контекст никому не нужен — следующей сцены не будет.
+                if scene.is_final_for_novel:
+                    return novel
                 # Для первой сцены изложения ещё нет — собираем его только из её диалога
                 await self._story_context_generator.generate(scene.id)
 

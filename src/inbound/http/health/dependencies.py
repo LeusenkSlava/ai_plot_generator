@@ -1,4 +1,3 @@
-# inbound/http/health/dependencies.py
 from functools import partial
 from typing import Annotated
 

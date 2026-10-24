@@ -22,6 +22,9 @@ from src.core.novels.services.generation.assets import (
     _short,
 )
 from src.core.novels.services.generation.generators.base import BaseGenerator
+from src.core.novels.services.generation.generators.story_context import (
+    extract_used_phrases,
+)
 from src.core.novels.services.generation.prompts.cast import (
     find_protagonist,
     render_cast,
@@ -46,6 +49,8 @@ class DialogueGenerator(BaseGenerator):
         scene_assets: SceneAssetService,
         generator: GeneratorProtocol,
         reasoning_effort: str | None = None,
+        think: bool = True,
+        temperature: float | None = None,
     ):
         super().__init__(generator)
         self._novel_service = novel_service
@@ -55,12 +60,15 @@ class DialogueGenerator(BaseGenerator):
         self._character_service = character_service
         self._dialogue_line_service = dialogue_line_service
         self._reasoning_effort = reasoning_effort
+        self._think = think
+        self._temperature = temperature
 
     async def generate(
         self,
         scene_id: int,
         previous_lines: list[DialogueLine] | None = None,
         story_context: str | None = None,
+        all_lines: list[DialogueLine] | None = None,
     ) -> list[DialogueLine]:
         """Генерация диалога"""
         scene = await self._scene_service.get(scene_id)
@@ -89,6 +97,10 @@ class DialogueGenerator(BaseGenerator):
         current_outfits = self._scene_assets.current_outfits(
             characters, assets, last_outfits
         )
+        used_phrases = extract_used_phrases(
+            [line.text for line in (all_lines or [])],
+            [c.name for c in all_characters],
+        )
 
         prompt = self.__create_prompt(
             scene,
@@ -99,8 +111,14 @@ class DialogueGenerator(BaseGenerator):
             previous_lines or [],
             story_context,
             current_outfits,
+            used_phrases,
         )
-        data = await self._generate(prompt, reasoning_effort=self._reasoning_effort)
+        data = await self._generate(
+            prompt,
+            think=self._think,
+            reasoning_effort=self._reasoning_effort,
+            temperature=self._temperature,
+        )
 
         lines_data = data.get("dialogue_lines")
         if not lines_data:
@@ -183,6 +201,7 @@ class DialogueGenerator(BaseGenerator):
         previous_lines: list[DialogueLine],
         story_context: str | None,
         current_outfits: str,
+        used_phrases: list[str],
     ) -> list[dict]:
         # Полный каст в фиксированном порядке — стабильная голова промпта для кэша.
         cast = render_cast(all_characters)
@@ -275,6 +294,11 @@ class DialogueGenerator(BaseGenerator):
                 for line in previous_lines
             )
             user_content += f"\n\nLast lines of the previous scene (continue the story, do not repeat them):\n{recap}"
+        if used_phrases:
+            user_content += (
+                "\n\nPhrases already used in the story (do not repeat them verbatim):\n"
+                + "\n".join(f"- {p}" for p in used_phrases)
+            )
         user_content += f"\n\nScene: {scene.title}\nScene description: {scene.description}"
         user_content += f"\nScene participants: {scene_participants}"
         system_prompt["content"] += f"\n{RUSSIAN_OUTPUT_NOTE}"
