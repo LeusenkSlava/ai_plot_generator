@@ -35,7 +35,6 @@ async def lifespan(app: FastAPI):
         topic=settings.analytics.KAFKA_TOPIC,
         service=settings.app.SERVICE_ID,
         spool=Spool(Path(settings.analytics.SPOOL_DIR) / settings.analytics.SPOOL_FILE),
-        response_steps=set(settings.analytics.RESPONSE_STEPS),
         flush_interval_s=settings.analytics.FLUSH_INTERVAL_S,
         max_retries=settings.analytics.MAX_RETRIES,
         retry_backoff_s=settings.analytics.RETRY_BACKOFF_S,

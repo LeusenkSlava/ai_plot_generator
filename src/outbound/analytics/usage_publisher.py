@@ -7,9 +7,9 @@
 не влияет на генерацию и не теряет данные.
 
 Событие соответствует схеме ClickHouse ``analytics.llm_calls``: помимо метрик
-(токены/латентность/ошибка) передаются ``event_id`` (дедуп-ключ), ``scene_order``
-и, для «контентных» шагов, ``response`` (сырой JSON ответа LLM). Промпты
-(``messages``) в аналитику не отправляются.
+(токены/латентность/ошибка) передаются ``event_id`` (дедуп-ключ), ``scene_order``,
+а также полные ``response`` (сырой ответ LLM) и ``messages`` (весь промпт,
+сериализованный в JSON-строку) для каждого вызова.
 """
 
 import asyncio
@@ -22,17 +22,6 @@ from aiokafka import AIOKafkaProducer
 from src.outbound.analytics.spool import Spool
 
 logger = logging.getLogger(__name__)
-
-# Шаги, чьи ответы (response) нужны для разбора сюжета и багов.
-RESPONSE_STEPS_DEFAULT = frozenset(
-    {
-        "RoadmapGenerator",
-        "SceneGenerator",
-        "DialogueGenerator",
-        "StoryContextGenerator",
-        "SceneRoadmapValidator",
-    }
-)
 
 
 def _to_int(value) -> int:
@@ -63,7 +52,6 @@ def build_usage_event(
     *,
     entity_id: int | None,
     service: str,
-    response_steps: frozenset | set | None = None,
 ) -> dict:
     """Собирает событие аналитики в формате analytics.llm_calls.
 
@@ -72,11 +60,11 @@ def build_usage_event(
       - ``scene_order``     <- 0 для create_novel, N для scene_N
       - ``cached_tokens``   <- cache_hit_tokens (токены, попавшие в кэш)
       - ``duration_ms``     <- duration_s * 1000
-      - ``response``        <- текст ответа только для контентных шагов
+      - ``response``        <- сырой ответ LLM (для всех шагов)
+      - ``messages``        <- весь промпт, сериализованный в JSON-строку
     """
-    allowed = response_steps if response_steps is not None else RESPONSE_STEPS_DEFAULT
-    step = record.get("step") or ""
     operation = record.get("operation") or ""
+    step = record.get("step") or ""
     duration_s = record.get("duration_s") or 0
 
     return {
@@ -97,7 +85,8 @@ def build_usage_event(
         "llm_requests": 1,
         "tool_calls": 0,
         "error": record.get("error") or "",
-        "response": (record.get("response") or "") if step in allowed else "",
+        "response": record.get("response") or "",
+        "messages": json.dumps(record.get("messages") or [], ensure_ascii=False),
     }
 
 
@@ -111,7 +100,6 @@ class AnalyticsSink:
         service: str,
         *,
         spool: Spool,
-        response_steps: frozenset | set | None = None,
         flush_interval_s: float = 1.0,
         max_retries: int = 3,
         retry_backoff_s: float = 0.5,
@@ -121,9 +109,6 @@ class AnalyticsSink:
         self._topic = topic
         self._service = service
         self._spool = spool
-        self._response_steps = (
-            response_steps if response_steps is not None else RESPONSE_STEPS_DEFAULT
-        )
         self._flush_interval_s = flush_interval_s
         self._max_retries = max_retries
         self._retry_backoff_s = retry_backoff_s
@@ -139,7 +124,6 @@ class AnalyticsSink:
             record,
             entity_id=entity_id,
             service=self._service,
-            response_steps=self._response_steps,
         )
         try:
             self._queue.put_nowait(event)

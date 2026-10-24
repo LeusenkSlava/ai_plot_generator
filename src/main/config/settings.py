@@ -74,16 +74,6 @@ class AnalyticsSettings(BaseSettings):
     SPOOL_DIR: str = "llm_logs"
     SPOOL_FILE: str = "outbox.jsonl"
 
-    # Шаги, чьи ответы (response) публикуются в аналитику для разбора сюжета/багов.
-    # Остальные шаги шлют только метрики, без текста ответа.
-    RESPONSE_STEPS: list[str] = [
-        "RoadmapGenerator",
-        "SceneGenerator",
-        "DialogueGenerator",
-        "StoryContextGenerator",
-        "SceneRoadmapValidator",
-    ]
-
     # Период дренажа очереди/outbox (сек) и параметры ретрая отправки.
     FLUSH_INTERVAL_S: float = 1.0
     MAX_RETRIES: int = 3

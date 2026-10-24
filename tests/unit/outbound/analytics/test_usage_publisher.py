@@ -45,6 +45,7 @@ def test_full_mapping():
         "tool_calls": 0,
         "error": "",
         "response": "",
+        "messages": "[]",
     }
 
 
@@ -66,7 +67,7 @@ def test_scene_order_derived_from_operation():
     )["scene_order"] == 0
 
 
-def test_response_only_for_allowed_steps():
+def test_response_stored_for_all_steps():
     dialogue = build_usage_event(
         _record(step="DialogueGenerator", response='{"dialogue_lines": []}'),
         entity_id=1,
@@ -79,7 +80,16 @@ def test_response_only_for_allowed_steps():
         entity_id=1,
         service="svc",
     )
-    assert novel["response"] == ""
+    assert novel["response"] == '{"title": "x"}'
+
+
+def test_messages_serialized_to_json_string():
+    event = build_usage_event(
+        _record(messages=[{"role": "system", "content": "Ты — писатель."}]),
+        entity_id=1,
+        service="svc",
+    )
+    assert event["messages"] == '[{"role": "system", "content": "Ты — писатель."}]'
 
 
 def test_missing_fields_default_to_zero_and_empty():
@@ -105,6 +115,7 @@ def test_missing_fields_default_to_zero_and_empty():
     assert event["duration_ms"] == 0
     assert event["error"] == ""
     assert event["job_id"] == ""
+    assert event["messages"] == "[]"
 
 
 def test_error_is_propagated():
