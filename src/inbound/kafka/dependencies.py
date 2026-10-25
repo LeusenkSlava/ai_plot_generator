@@ -21,6 +21,9 @@ from src.core.novels.services.generation.generators import (
     SceneGenerator,
     StoryContextGenerator,
 )
+from src.core.novels.services.generation.generators.dialogue_repair import (
+    DialogueRepairService,
+)
 from src.core.novels.services.generation.generators.scene_roadmap_validator import (
     SceneRoadmapValidator,
 )
@@ -116,6 +119,7 @@ def build_novel_generators(
         )
     )
     scene_assets = SceneAssetService(codex_service)
+    repair = DialogueRepairService(generator=generator, scene_assets=scene_assets)
 
     return NovelGenerators(
         novel=NovelGenerator(
@@ -161,6 +165,8 @@ def build_novel_generators(
             reasoning_effort=settings.deepseek.DIALOGUE_REASONING_EFFORT,
             think=settings.deepseek.DIALOGUE_THINK,
             temperature=settings.deepseek.DIALOGUE_TEMPERATURE,
+            repair=repair,
+            max_validation_retries=settings.deepseek.DIALOGUE_VALIDATION_RETRIES,
         ),
         story_context=StoryContextGenerator(
             novel_service=services.novel,

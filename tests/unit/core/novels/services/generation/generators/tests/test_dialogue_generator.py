@@ -721,6 +721,84 @@ class TestMissingEmotionFix:
 
 
 # ---------------------------------------------------------------------------
+# Точечный ремонт и ретрай (новый пайплайн generate)
+# ---------------------------------------------------------------------------
+
+
+class TestRepairFlow:
+    async def test_unknown_name_repaired_by_llm(self, sut, generator, world):
+        """Неизвестное имя ремапится одним дешёвым запросом, без полного ретрая."""
+        generator.returns(
+            valid_dialogue_llm_payload(
+                dialogue_line_payload(character_name="Незнакомец", text="Кто я?")
+            )
+        ).returns(
+            {"fixes": [{"index": 1, "character_name": "Алиса", "text": "Кто я?"}]}
+        )
+
+        result = await sut.generate(scene_id=world.scene.id)
+
+        assert [line.character_id for line in result] == [world.alice.id]
+        assert result[0].text == "Кто я?"
+        assert generator.call_count == 2  # основной вызов + точечный ремонт
+
+    async def test_duplicate_lines_deduped_and_reordered(self, sut, generator, world):
+        """Точные дубли удаляются; order/is_final_for_scene считаются по финальному списку."""
+        generator.returns(
+            valid_dialogue_llm_payload(
+                dialogue_line_payload(character_name="Алиса", text="Я найду брата!"),
+                dialogue_line_payload(character_name="Боб", text="Я пойду с тобой."),
+                dialogue_line_payload(character_name="Алиса", text="Я найду брата!"),
+            )
+        )
+
+        result = await sut.generate(scene_id=world.scene.id)
+
+        assert [line.text for line in result] == ["Я найду брата!", "Я пойду с тобой."]
+        assert [line.order for line in result] == [1, 2]
+        assert [line.is_final_for_scene for line in result] == [False, True]
+        assert generator.call_count == 1  # дедуп детерминированный, без LLM
+
+    async def test_truncated_end_completed(self, sut, generator, world):
+        """Обрыв последней реплики дописывается дешёвым запросом, остальные не трогаются."""
+        generator.returns(
+            valid_dialogue_llm_payload(
+                dialogue_line_payload(character_name="Алиса", text="Я найду брата!"),
+                dialogue_line_payload(character_name="Боб", text="Мы пойдём вместе и"),
+            )
+        ).returns(
+            {
+                "fixes": [
+                    {
+                        "index": 1,
+                        "character_name": "Боб",
+                        "text": "Мы пойдём вместе и найдём его.",
+                    }
+                ]
+            }
+        )
+
+        result = await sut.generate(scene_id=world.scene.id)
+
+        assert result[0].text == "Я найду брата!"
+        assert result[-1].text == "Мы пойдём вместе и найдём его."
+        assert result[-1].is_final_for_scene is True
+        assert generator.call_count == 2
+
+    async def test_retry_recovers_with_feedback(self, sut, generator, world):
+        """Первый ответ битый (пустой), повтор с feedback даёт валидный диалог."""
+        generator.returns({"dialogue_lines": []}).returns(_default_payload())
+
+        result = await sut.generate(scene_id=world.scene.id)
+
+        assert [line.text for line in result] == ["Я найду брата!", "Я пойду с тобой."]
+        assert generator.call_count == 2
+        # Второму вызову добавлено user-сообщение с причиной.
+        assert generator.calls[1][-1]["role"] == "user"
+        assert "Reason:" in generator.calls[1][-1]["content"]
+
+
+# ---------------------------------------------------------------------------
 # Ошибки
 # ---------------------------------------------------------------------------
 
@@ -759,26 +837,28 @@ class TestGenerateErrors:
 
         assert generator.not_called
 
-    async def test_unknown_character(self, sut, generator, world):
-        generator.returns(
+    async def test_unknown_character_retries_then_raises(self, sut, generator, world):
+        """Неизвестное имя не чинится фуззи/LLM — после ретраев GenerationError."""
+        generator.always_returns(
             valid_dialogue_llm_payload(
                 dialogue_line_payload(character_name="Незнакомец", text="Кто я?")
             )
         )
 
-        with pytest.raises(GenerationError, match="unknown character 'Незнакомец'"):
+        with pytest.raises(GenerationError, match="не удалось получить валидный диалог"):
             await sut.generate(scene_id=world.scene.id)
 
     async def test_generator_returns_no_lines(self, sut, generator, world):
-        generator.returns({"dialogue_lines": []})
+        """Пустой ответ неисправим — полный ретрай, затем GenerationError."""
+        generator.always_returns({"dialogue_lines": []})
 
-        with pytest.raises(GenerationError, match="no dialogue lines"):
+        with pytest.raises(GenerationError, match="не удалось получить валидный диалог"):
             await sut.generate(scene_id=world.scene.id)
 
     async def test_generator_missing_lines_key(self, sut, generator, world):
-        generator.returns({})
+        generator.always_returns({})
 
-        with pytest.raises(GenerationError, match="no dialogue lines"):
+        with pytest.raises(GenerationError, match="не удалось получить валидный диалог"):
             await sut.generate(scene_id=world.scene.id)
 
     async def test_llm_failure_wrapped_in_generation_error(self, sut, generator, world):

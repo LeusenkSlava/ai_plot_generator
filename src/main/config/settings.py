@@ -54,6 +54,8 @@ class DeepSeekSettings(BaseSettings):
     DIALOGUE_THINK: bool = True
 
     SCENE_VALIDATION_RETRIES: int = 3
+    # Лимит полных ретраев диалога при неисправимых дефектах (после точечного ремонта).
+    DIALOGUE_VALIDATION_RETRIES: int = 3
 
 
 class CodexSettings(BaseSettings):

@@ -22,6 +22,11 @@ from src.core.novels.services.generation.assets import (
     _short,
 )
 from src.core.novels.services.generation.generators.base import BaseGenerator
+from src.core.novels.services.generation.generators.dialogue_repair import (
+    DefectKind,
+    DialogueDefect,
+    DialogueRepairService,
+)
 from src.core.novels.services.generation.generators.story_context import (
     extract_used_phrases,
 )
@@ -51,6 +56,8 @@ class DialogueGenerator(BaseGenerator):
         reasoning_effort: str | None = None,
         think: bool = True,
         temperature: float | None = None,
+        repair: DialogueRepairService | None = None,
+        max_validation_retries: int = 3,
     ):
         super().__init__(generator)
         self._novel_service = novel_service
@@ -62,6 +69,10 @@ class DialogueGenerator(BaseGenerator):
         self._reasoning_effort = reasoning_effort
         self._think = think
         self._temperature = temperature
+        self._repair = repair or DialogueRepairService(
+            generator=generator, scene_assets=scene_assets
+        )
+        self._max_validation_retries = max_validation_retries
 
     async def generate(
         self,
@@ -102,7 +113,7 @@ class DialogueGenerator(BaseGenerator):
             [c.name for c in all_characters],
         )
 
-        prompt = self.__create_prompt(
+        base_prompt = self.__create_prompt(
             scene,
             characters,
             all_characters,
@@ -113,22 +124,44 @@ class DialogueGenerator(BaseGenerator):
             current_outfits,
             used_phrases,
         )
-        data = await self._generate(
-            prompt,
-            think=self._think,
-            reasoning_effort=self._reasoning_effort,
-            temperature=self._temperature,
-        )
 
-        lines_data = data.get("dialogue_lines")
-        if not lines_data:
-            raise GenerationError("Generator returned no dialogue lines")
+        valid_names = [c.name for c in characters]
+        remaining_retries = self._max_validation_retries
+        prompt = base_prompt
+        last_reason: str | None = None
+        lines_data: list[dict] | None = None
+        while True:
+            data = await self._generate(
+                prompt,
+                think=self._think,
+                reasoning_effort=self._reasoning_effort,
+                temperature=self._temperature,
+            )
+            repair_result = await self._repair.repair_lines(
+                data.get("dialogue_lines") or [], valid_names, previous_lines or []
+            )
+            if not repair_result.has_unfixable:
+                lines_data = repair_result.lines_data
+                break
+
+            last_reason = self._describe_defects(repair_result.unfixable)
+            if remaining_retries <= 0:
+                break
+            remaining_retries -= 1
+            prompt = [*base_prompt, self.__retry_message(last_reason)]
+
+        if lines_data is None:
+            raise GenerationError(
+                "DialogueGenerator: не удалось получить валидный диалог после "
+                f"ретраев: {last_reason or 'неизвестная ошибка'}"
+            )
 
         # Фаза 1: запросы на подбор фона/спрайта/одежды/эмоции по тегам от LLM
         prepared: list[tuple[Character, dict, LineAssets]] = []
         for item in lines_data:
             character = characters_by_name.get(item["character_name"])
             if not character:
+                # Не должно случаться после ремонта — но на всякий случай явный guard.
                 raise GenerationError(
                     f"Generator referenced unknown character '{item['character_name']}'"
                 )
@@ -147,11 +180,12 @@ class DialogueGenerator(BaseGenerator):
 
         # Фаза 2.5: если наряд резолвился, а эмоция нет (LLM выдумал emotion-тег),
         # перевыбираем эмоцию заново одним дешёвым запросом — без перегенерации сцены.
-        resolved = await self._fix_missing_emotions(
+        resolved = await self._repair.repair_tags(
             prepared, resolved, assets, novel.universe_id if novel else None
         )
 
-        # Фаза 3: сохраняем реплики с итоговыми asset_key
+        # Фаза 3: сохраняем реплики с итоговыми asset_key. order и is_final_for_scene
+        # считаются по финальному списку (после дедупа/отбрасывания строк).
         dialogue_lines = []
         last_index = len(lines_data) - 1
         for index, (character, item, _) in enumerate(prepared):
@@ -197,156 +231,35 @@ class DialogueGenerator(BaseGenerator):
         ids = set(scene.character_ids)
         return [c for c in all_characters if c.id in ids], all_characters
 
-    async def _fix_missing_emotions(
-        self,
-        prepared: list[tuple[Character, dict, LineAssets]],
-        resolved: list[ResolvedAssets],
-        assets: SceneAssets,
-        universe_id: int | None,
-    ) -> list[ResolvedAssets]:
-        """Перевыбирает эмоции реплик, где наряд резолвился, а эмоция — нет.
+    @staticmethod
+    def _describe_defects(defects: list[DialogueDefect]) -> str:
+        """Сводит неисправимые дефекты к человекочитаемой причине ретрая."""
+        parts: list[str] = []
+        for d in defects:
+            if d.kind is DefectKind.NO_LINES:
+                parts.append("no dialogue lines returned")
+            elif d.kind is DefectKind.UNKNOWN_CHARACTER:
+                parts.append(f"unknown character name at line {d.line_index}")
+            elif d.kind is DefectKind.TRUNCATED_END:
+                parts.append(f"last line cut off mid-sentence at line {d.line_index}")
+            else:
+                parts.append(d.kind.value)
+        return "; ".join(parts) or "unknown error"
 
-        Причина — emotion_base_tag, которого нет в каталоге выбранного наряда
-        (LLM выдумал slug). Текст при этом корректен, поэтому перегенерация всей
-        сцены не нужна: одним коротким запросом просим LLM выбрать эмоцию заново
-        строго из каталога и до-резолвим только emotion_asset_key.
-        """
-        if universe_id is None:
-            return resolved
-
-        missing: list[tuple[int, Character, str, str]] = []
-        for index, (character, item, line) in enumerate(prepared):
-            if character.is_protagonist:
-                continue
-            picked = resolved[index]
-            if picked.outfit_asset_key is None or picked.emotion_asset_key is not None:
-                continue
-            outfit_tag = line.outfit_tag
-            if not outfit_tag:
-                continue
-            missing.append((index, character, outfit_tag, item["text"]))
-
-        if not missing:
-            return resolved
-
-        data = await self._generate(
-            self._emotion_repair_prompt(missing, assets), think=False
-        )
-        response_by_index = self._index_emotion_response(data.get("lines") or [])
-
-        for position, (index, character, outfit_tag, _) in enumerate(missing, start=1):
-            base_slugs, modifier_slugs = self._scene_assets.emotions_for_outfit(
-                assets, character.codex_character_id, outfit_tag
-            )
-            base_tag, modifier_tags = self._pick_emotion(
-                response_by_index.get(position), base_slugs, modifier_slugs
-            )
-            if base_tag is None:
-                continue
-            emotion_asset_key = await self._scene_assets.match_emotion_asset(
-                character.codex_character_id, outfit_tag, [base_tag, *modifier_tags]
-            )
-            if emotion_asset_key:
-                resolved[index].emotion_asset_key = emotion_asset_key
-
-        return resolved
-
-    def _emotion_repair_prompt(
-        self,
-        missing: list[tuple[int, Character, str, str]],
-        assets: SceneAssets,
-    ) -> list[dict]:
-        system_prompt = {
-            "role": "system",
+    @staticmethod
+    def __retry_message(reason: str) -> dict:
+        """Дополнительное user-сообщение с требованием вернуть валидный JSON."""
+        return {
+            "role": "user",
             "content": (
-                "You fix the emotion tags of the generated dialogue lines below. "
-                "The text of each line is final and must stay unchanged; you only choose "
-                "the emotion shown on the speaker's sprite. Pick the emotion that best "
-                "matches the mood of each line, using ONLY the slugs listed for that "
-                "character's outfit in the catalog. Do not invent slugs and do not reuse "
-                "emotions of other characters or outfits.\n"
-                "For each line return:\n"
-                "1. index - the line's number as given;\n"
-                "2. emotion_base_tag - ONE base emotion slug from the catalog for that outfit;\n"
-                "3. emotion_modifier_tags - 0 or more modifier slugs from the catalog for that "
-                "outfit.\n"
-                "Answer STRICTLY as JSON matching this schema:\n"
-                """
-                {
-                  "lines": [
-                    {"index": integer, "emotion_base_tag": string, "emotion_modifier_tags": [string]}
-                  ]
-                }
-                """
+                "The dialogue you returned is invalid and could not be repaired "
+                "automatically. Return a completely new dialogue as JSON matching the "
+                "original schema. Use ONLY the character names from the scene "
+                "participants list, give every line non-empty text, and do not cut the "
+                "last line off mid-sentence.\n"
+                f"Reason: {reason}"
             ),
         }
-
-        catalog_lines: list[str] = []
-        seen: set[tuple[int | None, str]] = set()
-        for _, character, outfit_tag, _ in missing:
-            key = (character.codex_character_id, outfit_tag)
-            if key in seen:
-                continue
-            seen.add(key)
-            base_slugs, modifier_slugs = self._scene_assets.emotions_for_outfit(
-                assets, character.codex_character_id, outfit_tag
-            )
-            base = ", ".join(base_slugs) or "-"
-            modifiers = ", ".join(modifier_slugs) or "-"
-            catalog_lines.append(
-                f"- {character.name} (outfit_tag {outfit_tag}): "
-                f"base: {base}; modifiers: {modifiers}"
-            )
-
-        line_items = [
-            f"{position}. {character.name} (outfit_tag {outfit_tag}): \"{text}\""
-            for position, (_, character, outfit_tag, text) in enumerate(missing, start=1)
-        ]
-
-        user_content = (
-            "Catalog (character -> outfit_tag -> emotions):\n"
-            + "\n".join(catalog_lines)
-            + "\n\nLines to fix:\n"
-            + "\n".join(line_items)
-        )
-        return [system_prompt, {"role": "user", "content": user_content}]
-
-    @staticmethod
-    def _index_emotion_response(lines_data: object) -> dict[int, dict]:
-        """Сводит ответ LLM к {index: {…}}; некорректные записи отбрасываются."""
-        by_index: dict[int, dict] = {}
-        if not isinstance(lines_data, list):
-            return by_index
-        for item in lines_data:
-            if not isinstance(item, dict):
-                continue
-            try:
-                index = int(item.get("index"))
-            except (TypeError, ValueError):
-                continue
-            by_index[index] = item
-        return by_index
-
-    @staticmethod
-    def _pick_emotion(
-        item: dict | None, base_slugs: list[str], modifier_slugs: list[str]
-    ) -> tuple[str | None, list[str]]:
-        """Проверяет выбранные LLM теги; при невалидности — детерминированный запасной."""
-        base_tag: str | None = None
-        modifier_tags: list[str] = []
-        if isinstance(item, dict):
-            base_tag = item.get("emotion_base_tag")
-            raw = item.get("emotion_modifier_tags") or []
-            if isinstance(raw, list):
-                modifier_tags = [str(m) for m in raw]
-        if base_tag not in base_slugs or not all(
-            m in modifier_slugs for m in modifier_tags
-        ):
-            base_tag = "normal" if "normal" in base_slugs else (
-                base_slugs[0] if base_slugs else None
-            )
-            modifier_tags = []
-        return base_tag, modifier_tags
 
     def __create_prompt(
         self,
@@ -457,7 +370,9 @@ class DialogueGenerator(BaseGenerator):
                 "\n\nPhrases already used in the story (do not repeat them verbatim):\n"
                 + "\n".join(f"- {p}" for p in used_phrases)
             )
-        user_content += f"\n\nScene: {scene.title}\nScene description: {scene.description}"
+        user_content += (
+            f"\n\nScene: {scene.title}\nScene description: {scene.description}"
+        )
         user_content += f"\nScene participants: {scene_participants}"
         system_prompt["content"] += f"\n{RUSSIAN_OUTPUT_NOTE}"
 
