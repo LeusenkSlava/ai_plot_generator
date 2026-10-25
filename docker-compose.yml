@@ -12,6 +12,7 @@ networks:
 volumes:
   postgres_data:
   postgres_config:
+  redis_data:
 
 services:
   migrations:
@@ -43,6 +44,8 @@ services:
       - 8000
     depends_on:
       db_pg:
+        condition: service_healthy
+      redis:
         condition: service_healthy
       migrations:
         condition: service_completed_successfully
@@ -82,3 +85,18 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql
       - postgres_config:/etc/postgresql
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    command: [ "redis-server", "--appendonly", "yes" ]
+    networks:
+      - ai_plot_generator
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 2s
+      retries: 5
+      start_period: 1s

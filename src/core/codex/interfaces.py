@@ -5,13 +5,9 @@ from src.core.codex.models import (
     BackgroundMatchItem,
     BackgroundTags,
     CodexCharacter,
-    Emotion,
-    EmotionMatchItem,
-    EmotionTags,
-    Outfit,
-    Sprite,
-    Tag,
+    OutfitWithEmotions,
     Universe,
+    VisualMatch,
 )
 
 
@@ -27,18 +23,9 @@ class CodexClientProtocol(Protocol):
     async def match_backgrounds_batch(
         self, items: list[BackgroundMatchItem]
     ) -> dict[int, Background | None]: ...
-    async def get_sprites(self, character_id: int) -> list[Sprite]: ...
-    async def get_sprites_batch(
+    async def get_outfits_with_emotions_batch(
         self, character_ids: list[int]
-    ) -> dict[int, list[Sprite]]: ...
-    async def get_emotions(self, character_id: int) -> list[Emotion]: ...
-    async def get_emotion_tags(self, character_id: int) -> EmotionTags: ...
-    async def match_emotion(
-        self, character_id: int, tags: list[str], sprite_id: int | None = None
-    ) -> Emotion | None: ...
-    async def match_emotions_batch(
-        self, items: list[EmotionMatchItem]
-    ) -> dict[int, Emotion | None]: ...
-    async def get_outfits(self, sprite_id: int) -> list[Outfit]: ...
-    async def get_outfit_tags(self, character_id: int) -> list[Tag]: ...
-    async def match_outfit(self, sprite_id: int, tag: str) -> Outfit | None: ...
+    ) -> dict[int, list[OutfitWithEmotions]]: ...
+    async def match_visual(
+        self, character_id: int, outfit_tag: str, emotion_tags: list[str]
+    ) -> VisualMatch | None: ...

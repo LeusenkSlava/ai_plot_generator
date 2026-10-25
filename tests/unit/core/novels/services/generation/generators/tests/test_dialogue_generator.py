@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.core.codex.models import BackgroundTags, EmotionTags, Tag, TagType
+from src.core.codex.models import BackgroundTags, Tag, TagKind, TagType, VisualMatch
 from src.core.novels.exceptions import GenerationError
 from src.core.novels.services.crud import (
     CharacterService,
@@ -43,6 +43,7 @@ from tests.fakes.outbound.database.repositories.scene_repository import (
 from tests.unit.outbound.codex.factories import (
     emotion_domain,
     outfit_domain,
+    outfit_with_emotions_domain,
     sprite_domain,
 )
 
@@ -55,9 +56,15 @@ BOB_CODEX_ID = 20
 
 
 def seed_codex(codex: FakeCodexService) -> None:
-    angry = Tag(id=1, type=TagType.EMOTION, slug="angry", name="Злость")
-    soft = Tag(id=2, type=TagType.EMOTION, slug="soft", name="Мягко")
-    calm = Tag(id=3, type=TagType.EMOTION, slug="calm", name="Спокойствие")
+    angry = Tag(
+        id=1, type=TagType.EMOTION, slug="angry", name="Злость", kind=TagKind.BASE
+    )
+    soft = Tag(
+        id=2, type=TagType.EMOTION, slug="soft", name="Мягко", kind=TagKind.MODIFIER
+    )
+    calm = Tag(
+        id=3, type=TagType.EMOTION, slug="calm", name="Спокойствие", kind=TagKind.BASE
+    )
     red_dress = Tag(
         id=4, type=TagType.OUTFIT_STYLE, slug="red-dress", name="Красное платье"
     )
@@ -80,74 +87,72 @@ def seed_codex(codex: FakeCodexService) -> None:
         ),
     )
 
-    codex.add_emotion_tags(ALICE_CODEX_ID, EmotionTags(base=[angry], modifiers=[soft]))
-    codex.add_outfit_tags(ALICE_CODEX_ID, [red_dress])
-    codex.add_sprites(
+    codex.add_outfits_with_emotions(
         ALICE_CODEX_ID,
         [
-            sprite_domain(
-                id=100, character_id=ALICE_CODEX_ID, slug="alice-base",
-                description="Алиса", asset_key="sprites/alice.png",
+            outfit_with_emotions_domain(
+                outfit=outfit_domain(
+                    id=200, sprite_id=100, slug="red-dress", name="Красное платье",
+                    asset_key="outfits/red-dress.png", tags=[red_dress],
+                ),
+                emotions=[
+                    emotion_domain(
+                        id=300, sprite_id=100, slug="angry", name="Злость",
+                        asset_key="emotions/alice-angry.png", tags=[angry],
+                    ),
+                    emotion_domain(
+                        id=301, sprite_id=100, slug="soft", name="Мягко",
+                        asset_key="emotions/alice-soft.png", tags=[soft],
+                    ),
+                ],
             )
         ],
     )
-    codex.add_outfits(
-        100,
+    codex.add_outfits_with_emotions(
+        BOB_CODEX_ID,
         [
-            outfit_domain(
-                id=200, sprite_id=100, slug="red-dress", name="Красное платье",
-                asset_key="outfits/red-dress.png", tags=[red_dress],
+            outfit_with_emotions_domain(
+                outfit=outfit_domain(
+                    id=201, sprite_id=101, slug="armor", name="Доспех",
+                    asset_key="outfits/armor.png", tags=[armor],
+                ),
+                emotions=[
+                    emotion_domain(
+                        id=302, sprite_id=101, slug="calm", name="Спокойствие",
+                        asset_key="emotions/bob-calm.png", tags=[calm],
+                    ),
+                ],
             )
         ],
     )
 
-    codex.add_emotion_tags(BOB_CODEX_ID, EmotionTags(base=[calm], modifiers=[]))
-    codex.add_outfit_tags(BOB_CODEX_ID, [armor])
-    codex.add_sprites(
-        BOB_CODEX_ID,
-        [
-            sprite_domain(
-                id=101, character_id=BOB_CODEX_ID, slug="bob-armor",
-                description="Боб", asset_key="sprites/bob.png",
-            )
-        ],
+    alice_sprite = sprite_domain(
+        id=100, character_id=ALICE_CODEX_ID, slug="alice-base",
+        description="Алиса", asset_key="sprites/alice.png",
     )
-    codex.add_outfits(
-        101,
-        [
-            outfit_domain(
-                id=201, sprite_id=101, slug="armor", name="Доспех",
-                asset_key="outfits/armor.png", tags=[armor],
-            )
-        ],
+    bob_sprite = sprite_domain(
+        id=101, character_id=BOB_CODEX_ID, slug="bob-armor",
+        description="Боб", asset_key="sprites/bob.png",
     )
 
-    codex.set_match_emotion(
+    codex.set_match_visual(
         ALICE_CODEX_ID,
-        emotion_domain(
-            id=300, sprite_id=100, slug="angry", name="Злость",
-            asset_key="emotions/alice-angry.png",
+        "red-dress",
+        ["angry", "soft"],
+        VisualMatch(
+            sprite_asset_key=alice_sprite.asset_key,
+            outfit_asset_key="outfits/red-dress.png",
+            emotion_asset_key="emotions/alice-angry.png",
         ),
     )
-    codex.set_match_emotion(
+    codex.set_match_visual(
         BOB_CODEX_ID,
-        emotion_domain(
-            id=301, sprite_id=101, slug="calm", name="Спокойствие",
-            asset_key="emotions/bob-calm.png",
-        ),
-    )
-    codex.set_match_outfit(
-        100, "red-dress",
-        outfit_domain(
-            id=200, sprite_id=100, slug="red-dress", name="Красное платье",
-            asset_key="outfits/red-dress.png", tags=[red_dress],
-        ),
-    )
-    codex.set_match_outfit(
-        101, "armor",
-        outfit_domain(
-            id=201, sprite_id=101, slug="armor", name="Доспех",
-            asset_key="outfits/armor.png", tags=[armor],
+        "armor",
+        ["calm"],
+        VisualMatch(
+            sprite_asset_key=bob_sprite.asset_key,
+            outfit_asset_key="outfits/armor.png",
+            emotion_asset_key="emotions/bob-calm.png",
         ),
     )
 
@@ -159,7 +164,6 @@ def _default_payload() -> dict:
             text="Я найду брата!",
             background_base_tag="forest",
             background_modifier_tags=[],
-            sprite_slug="alice-base",
             emotion_base_tag="angry",
             emotion_modifier_tags=["soft"],
             outfit_tag="red-dress",
@@ -169,7 +173,6 @@ def _default_payload() -> dict:
             text="Я пойду с тобой.",
             background_base_tag="forest",
             background_modifier_tags=[],
-            sprite_slug="bob-armor",
             emotion_base_tag="calm",
             emotion_modifier_tags=[],
             outfit_tag="armor",
@@ -419,17 +422,10 @@ class TestGenerateWithUniverse:
     async def test_codex_loads_assets(self, sut, codex, world):
         await sut.generate(scene_id=world.scene.id)
 
-        # Фаза загрузки ассетов детерминирована (фон -> персонажи по id)
-        assert codex.calls[:9] == [
+        # Фаза загрузки ассетов: фон + каталог нарядов (параллельно)
+        assert codex.calls[:2] == [
             ("get_background_tags", 1),
-            ("get_emotion_tags", ALICE_CODEX_ID),
-            ("get_outfit_tags", ALICE_CODEX_ID),
-            ("get_sprites", ALICE_CODEX_ID),
-            ("get_outfits", 100),
-            ("get_emotion_tags", BOB_CODEX_ID),
-            ("get_outfit_tags", BOB_CODEX_ID),
-            ("get_sprites", BOB_CODEX_ID),
-            ("get_outfits", 101),
+            ("get_outfits_with_emotions_batch", [ALICE_CODEX_ID, BOB_CODEX_ID]),
         ]
 
     async def test_assets_resolved(self, sut, world):
@@ -460,19 +456,56 @@ class TestGenerateWithUniverse:
         assert "Backgrounds (background_base_tag" in user_prompt
         generator.assert_system_contains(
             "background_base_tag",
-            "sprite_slug",
             "outfit_tag",
             "emotion_base_tag",
             "emotion_modifier_tags",
         )
 
-    async def test_match_emotion_and_outfit_called(self, sut, codex, world):
+    async def test_prompt_has_no_sprite_slug(self, sut, generator, world):
         await sut.generate(scene_id=world.scene.id)
 
-        assert ("match_emotion", ALICE_CODEX_ID, ["angry", "soft"], 100) in codex.calls
-        assert ("match_emotion", BOB_CODEX_ID, ["calm"], 101) in codex.calls
-        assert ("match_outfit", 100, "red-dress") in codex.calls
-        assert ("match_outfit", 101, "armor") in codex.calls
+        generator.assert_system_not_contains("sprite_slug")
+
+    async def test_catalog_groups_emotions_by_outfit(self, sut, generator, world):
+        await sut.generate(scene_id=world.scene.id)
+
+        user_prompt = generator.last_user_prompt
+        assert "Outfits of character Алиса" in user_prompt
+        assert "red-dress" in user_prompt
+        assert "angry=Злость" in user_prompt
+        assert "soft=Мягко" in user_prompt
+
+    async def test_match_visual_called(self, sut, codex, world):
+        await sut.generate(scene_id=world.scene.id)
+
+        assert (
+            "match_visual",
+            ALICE_CODEX_ID,
+            "red-dress",
+            ["angry", "soft"],
+        ) in codex.calls
+        assert (
+            "match_visual",
+            BOB_CODEX_ID,
+            "armor",
+            ["calm"],
+        ) in codex.calls
+
+    async def test_sprite_asset_key_from_match_visual(self, sut, codex, world):
+        codex.set_match_visual(
+            ALICE_CODEX_ID,
+            "red-dress",
+            ["angry", "soft"],
+            VisualMatch(
+                sprite_asset_key="sprites/alice-close.png",
+                outfit_asset_key="outfits/red-dress.png",
+                emotion_asset_key="emotions/alice-angry.png",
+            ),
+        )
+
+        result = await sut.generate(scene_id=world.scene.id)
+
+        assert result[0].sprite_asset_key == "sprites/alice-close.png"
 
 
 # ---------------------------------------------------------------------------
@@ -548,54 +581,26 @@ class TestAssetMatching:
     def _seed_codex(self, codex: FakeCodexService) -> None:
         seed_codex(codex)
 
-    async def test_final_sprite_taken_from_emotion(self, sut, codex, world):
-        """match_emotion может вернуть эмоцию на другом спрайте — спрайт берём из неё."""
-        close_sprite = sprite_domain(
-            id=102, character_id=ALICE_CODEX_ID, slug="alice-close",
-            description="Алиса крупно", asset_key="sprites/alice-close.png",
-        )
-        codex.add_sprites(
-            ALICE_CODEX_ID,
-            [
-                sprite_domain(
-                    id=100, character_id=ALICE_CODEX_ID, slug="alice-base",
-                    description="Алиса", asset_key="sprites/alice.png",
-                ),
-                close_sprite,
-            ],
-        )
-        codex.set_match_emotion(
-            ALICE_CODEX_ID,
-            emotion_domain(
-                id=310, sprite_id=102, slug="angry", name="Злость",
-                asset_key="emotions/alice-angry-close.png",
-            ),
-        )
+    async def test_no_visual_match_sets_none(self, sut, codex, world):
+        """Отсутствие совпадения в Codex оставляет все asset_key пустыми."""
+        codex.set_match_visual(ALICE_CODEX_ID, "red-dress", ["angry", "soft"], None)
 
         result = await sut.generate(scene_id=world.scene.id)
 
         alice_line = result[0]
-        assert alice_line.sprite_asset_key == "sprites/alice-close.png"
-        assert alice_line.emotion_asset_key == "emotions/alice-angry-close.png"
-
-    async def test_no_emotion_falls_back_to_llm_sprite(self, sut, codex, world):
-        codex.set_match_emotion(ALICE_CODEX_ID, None)
-
-        result = await sut.generate(scene_id=world.scene.id)
-
-        alice_line = result[0]
+        assert alice_line.sprite_asset_key is None
+        assert alice_line.outfit_asset_key is None
         assert alice_line.emotion_asset_key is None
-        # спрайт берётся из выбора LLM, а не из эмоции
-        assert alice_line.sprite_asset_key == "sprites/alice.png"
 
-    async def test_emotion_unavailable_does_not_raise(self, sut, codex, world):
-        codex.fail_on("match_emotion")
+    async def test_visual_unavailable_does_not_raise(self, sut, codex, world):
+        codex.fail_on("match_visual")
 
         result = await sut.generate(scene_id=world.scene.id)
 
-        # генерация продолжается, эмоция не подобрана, спрайт — из LLM
+        # генерация продолжается, визуал не подобран
         assert result[0].emotion_asset_key is None
-        assert result[0].sprite_asset_key == "sprites/alice.png"
+        assert result[0].sprite_asset_key is None
+        assert result[0].outfit_asset_key is None
 
     async def test_unresolved_background_slug_is_none(self, sut, generator, world):
         generator.returns(
@@ -605,7 +610,6 @@ class TestAssetMatching:
                     text="Где же он?",
                     background_base_tag="nonexistent",
                     background_modifier_tags=[],
-                    sprite_slug="alice-base",
                     emotion_base_tag="angry",
                     emotion_modifier_tags=[],
                     outfit_tag="red-dress",
@@ -616,6 +620,104 @@ class TestAssetMatching:
         result = await sut.generate(scene_id=world.scene.id)
 
         assert result[0].background_asset_key is None
+
+
+# ---------------------------------------------------------------------------
+# Починка эмоций при генерации: наряд резолвился, а эмоция — нет
+# ---------------------------------------------------------------------------
+
+
+class TestMissingEmotionFix:
+    @pytest.fixture
+    def universe_id(self) -> int:
+        return 1
+
+    @pytest.fixture(autouse=True)
+    def _seed_codex(self, codex: FakeCodexService) -> None:
+        seed_codex(codex)
+
+    async def test_second_call_repairs_missing_emotion(
+        self, sut, generator, codex, world
+    ):
+        # Первый подбор: наряд резолвится, а эмоция — нет (LLM выдумал emotion-тег).
+        codex.set_match_visual(
+            ALICE_CODEX_ID,
+            "red-dress",
+            ["angry", "soft"],
+            VisualMatch(
+                sprite_asset_key="sprites/alice.png",
+                outfit_asset_key="outfits/red-dress.png",
+                emotion_asset_key=None,
+            ),
+        )
+        # Повторный подбор с корректным тегом возвращает эмоцию.
+        codex.set_match_visual(
+            ALICE_CODEX_ID,
+            "red-dress",
+            ["angry"],
+            VisualMatch(
+                sprite_asset_key="sprites/alice.png",
+                outfit_asset_key="outfits/red-dress.png",
+                emotion_asset_key="emotions/alice-angry.png",
+            ),
+        )
+        generator.returns(_default_payload()).returns(
+            {
+                "lines": [
+                    {"index": 1, "emotion_base_tag": "angry", "emotion_modifier_tags": []}
+                ]
+            }
+        )
+
+        result = await sut.generate(scene_id=world.scene.id)
+
+        assert generator.call_count == 2
+        assert result[0].emotion_asset_key == "emotions/alice-angry.png"
+
+    async def test_no_repair_when_all_emotions_resolve(
+        self, sut, generator, codex, world
+    ):
+        result = await sut.generate(scene_id=world.scene.id)
+
+        assert generator.call_count == 1
+        assert result[0].emotion_asset_key == "emotions/alice-angry.png"
+
+    async def test_fallback_when_repair_returns_invalid_tag(
+        self, sut, generator, codex, world
+    ):
+        codex.set_match_visual(
+            ALICE_CODEX_ID,
+            "red-dress",
+            ["angry", "soft"],
+            VisualMatch(
+                sprite_asset_key="sprites/alice.png",
+                outfit_asset_key="outfits/red-dress.png",
+                emotion_asset_key=None,
+            ),
+        )
+        codex.set_match_visual(
+            ALICE_CODEX_ID,
+            "red-dress",
+            ["angry"],
+            VisualMatch(
+                sprite_asset_key="sprites/alice.png",
+                outfit_asset_key="outfits/red-dress.png",
+                emotion_asset_key="emotions/alice-angry.png",
+            ),
+        )
+        # LLM снова вернул невалидный slug — падаем на детерминированный запасной.
+        generator.returns(_default_payload()).returns(
+            {
+                "lines": [
+                    {"index": 1, "emotion_base_tag": "serious", "emotion_modifier_tags": []}
+                ]
+            }
+        )
+
+        result = await sut.generate(scene_id=world.scene.id)
+
+        assert generator.call_count == 2
+        assert result[0].emotion_asset_key == "emotions/alice-angry.png"
 
 
 # ---------------------------------------------------------------------------
@@ -765,9 +867,10 @@ class TestProtagonist:
         assert alice_line.emotion_asset_key is None
 
         # ассеты протагониста не загружаются из Codex
-        assert ("get_emotion_tags", ALICE_CODEX_ID) not in codex.calls
-        assert ("get_outfit_tags", ALICE_CODEX_ID) not in codex.calls
-        assert ("get_sprites", ALICE_CODEX_ID) not in codex.calls
+        assert codex.calls[:2] == [
+            ("get_background_tags", 1),
+            ("get_outfits_with_emotions_batch", [BOB_CODEX_ID]),
+        ]
 
     async def test_protagonist_thought_preserved(self, sut, generator, protagonist_world):
         generator.returns(

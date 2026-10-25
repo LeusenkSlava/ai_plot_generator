@@ -87,6 +87,23 @@ class Outfit:
 
 
 @dataclass
+class OutfitWithEmotions:
+    """Наряд вместе с доступными на нём эмоциями (элемент каталога персонажа)."""
+
+    outfit: Outfit
+    emotions: list[Emotion] = field(default_factory=list)
+
+
+@dataclass
+class VisualMatch:
+    """Результат подбора визуала: спрайт + наряд + эмоция."""
+
+    sprite_asset_key: str
+    outfit_asset_key: str
+    emotion_asset_key: str | None
+
+
+@dataclass
 class EmotionTags:
     """Доступные персонажу emotion-теги, разделённые по роли."""
 

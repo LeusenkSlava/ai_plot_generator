@@ -15,6 +15,7 @@ from src.main.setup.background_tasks import BackgroundTaskRunner
 from src.outbound.ai.client import build_deepseek_client, close_deepseek_client
 from src.outbound.ai.llm_log import set_usage_publisher
 from src.outbound.analytics import AnalyticsSink, Spool
+from src.outbound.cache.client import build_redis_client, close_redis_client
 from src.outbound.codex.client import build_codex_client, close_codex_client
 from src.outbound.database.session import engine
 from src.outbound.kafka.producer import build_producer
@@ -26,6 +27,7 @@ setup_logging()
 async def lifespan(app: FastAPI):
     app.state.openai_client = build_deepseek_client()
     app.state.codex_client = build_codex_client()
+    app.state.redis_client = build_redis_client()
 
     producer = build_producer()
     await producer.start()
@@ -64,6 +66,7 @@ async def lifespan(app: FastAPI):
     await producer.stop()
     await close_deepseek_client()
     await close_codex_client()
+    await close_redis_client()
     await engine.dispose()
 
 

@@ -65,26 +65,19 @@ class OutfitSchema(BaseModel):
     tags: list[TagSchema] = []
 
 
-class EmotionTagsRequest(BaseModel):
-    """Тело запроса подбора одной эмоции."""
-
-    sprite_id: int | None = None
-    tags: list[str]
+class OutfitCatalogSchema(OutfitSchema):
+    emotions: list[EmotionSchema] = []
 
 
-class EmotionMatchItemSchema(BaseModel):
-    """Элемент батча подбора эмоций."""
-
-    character_id: int
-    sprite_id: int | None = None
-    tags: list[str]
+class VisualMatchRequest(BaseModel):
+    outfit_tag: str
+    emotion_tags: list[str] = []
 
 
-class EmotionTagsResponse(BaseModel):
-    """Доступные персонажу emotion-теги, разделённые по роли."""
-
-    base: list[TagSchema] = []
-    modifiers: list[TagSchema] = []
+class VisualMatchResponse(BaseModel):
+    sprite_asset_key: str | None = None
+    outfit_asset_key: str | None = None
+    emotion_asset_key: str | None = None
 
 
 class BackgroundTagsResponse(BaseModel):
@@ -105,9 +98,3 @@ class BackgroundMatchItemSchema(BaseModel):
 
     universe_id: int
     tags: list[str]
-
-
-class OutfitMatchRequest(BaseModel):
-    """Тело запроса подбора одной одежды по тегу."""
-
-    tag: str

@@ -61,6 +61,13 @@ class CodexSettings(BaseSettings):
     TIMEOUT: float = 10.0
 
 
+class RedisSettings(BaseSettings):
+    URL: str = "redis://redis:6379/0"
+
+    CODEX_TTL_S: int = 1800
+    CODEX_MATCH_TTL_S: int = 300
+
+
 class KafkaSettings(BaseSettings):
     BOOTSTRAP_SERVERS: str = "kafka:9092"
     CLIENT_ID: str = "ai_plot_generator_client"
@@ -96,6 +103,7 @@ class Settings(BaseSettings):
     deepseek: DeepSeekSettings
     kafka: KafkaSettings
     codex: CodexSettings = CodexSettings()
+    redis: RedisSettings = RedisSettings()
     analytics: AnalyticsSettings = AnalyticsSettings()
 
 

@@ -31,6 +31,8 @@ from src.core.novels.use_cases import (
 from src.main.config.settings import settings
 from src.outbound.ai.client import build_deepseek_client
 from src.outbound.ai.deepseek_client import DeepSeekGenerator
+from src.outbound.cache.client import build_redis_client
+from src.outbound.cache.redis_cache import RedisCache
 from src.outbound.codex.client import build_codex_client
 from src.outbound.codex.codex_client import HttpCodexClient
 from src.outbound.database.repositories.generation_job_repository import (
@@ -105,7 +107,14 @@ def build_novel_generators(
         client=build_deepseek_client(),
         temperature=settings.deepseek.TEMPERATURE,
     )
-    codex_service = CodexService(HttpCodexClient(build_codex_client()))
+    codex_service = CodexService(
+        HttpCodexClient(
+            build_codex_client(),
+            cache=RedisCache(build_redis_client()),
+            get_ttl_s=settings.redis.CODEX_TTL_S,
+            match_ttl_s=settings.redis.CODEX_MATCH_TTL_S,
+        )
+    )
     scene_assets = SceneAssetService(codex_service)
 
     return NovelGenerators(

@@ -182,7 +182,7 @@ def dialogue_line_payload(
     **asset_fields,
 ) -> dict:
     """Одна реплика в ответе LLM. asset_fields — необязательные
-    background_base_tag/background_modifier_tags/sprite_slug/outfit_tag/
+    background_base_tag/background_modifier_tags/outfit_tag/
     emotion_base_tag/emotion_modifier_tags."""
     return {"character_name": character_name, "text": text, **asset_fields}
 

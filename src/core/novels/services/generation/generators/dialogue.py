@@ -145,6 +145,12 @@ class DialogueGenerator(BaseGenerator):
             prepared, assets, novel.universe_id if novel else None
         )
 
+        # Фаза 2.5: если наряд резолвился, а эмоция нет (LLM выдумал emotion-тег),
+        # перевыбираем эмоцию заново одним дешёвым запросом — без перегенерации сцены.
+        resolved = await self._fix_missing_emotions(
+            prepared, resolved, assets, novel.universe_id if novel else None
+        )
+
         # Фаза 3: сохраняем реплики с итоговыми asset_key
         dialogue_lines = []
         last_index = len(lines_data) - 1
@@ -190,6 +196,157 @@ class DialogueGenerator(BaseGenerator):
             return all_characters, all_characters
         ids = set(scene.character_ids)
         return [c for c in all_characters if c.id in ids], all_characters
+
+    async def _fix_missing_emotions(
+        self,
+        prepared: list[tuple[Character, dict, LineAssets]],
+        resolved: list[ResolvedAssets],
+        assets: SceneAssets,
+        universe_id: int | None,
+    ) -> list[ResolvedAssets]:
+        """Перевыбирает эмоции реплик, где наряд резолвился, а эмоция — нет.
+
+        Причина — emotion_base_tag, которого нет в каталоге выбранного наряда
+        (LLM выдумал slug). Текст при этом корректен, поэтому перегенерация всей
+        сцены не нужна: одним коротким запросом просим LLM выбрать эмоцию заново
+        строго из каталога и до-резолвим только emotion_asset_key.
+        """
+        if universe_id is None:
+            return resolved
+
+        missing: list[tuple[int, Character, str, str]] = []
+        for index, (character, item, line) in enumerate(prepared):
+            if character.is_protagonist:
+                continue
+            picked = resolved[index]
+            if picked.outfit_asset_key is None or picked.emotion_asset_key is not None:
+                continue
+            outfit_tag = line.outfit_tag
+            if not outfit_tag:
+                continue
+            missing.append((index, character, outfit_tag, item["text"]))
+
+        if not missing:
+            return resolved
+
+        data = await self._generate(
+            self._emotion_repair_prompt(missing, assets), think=False
+        )
+        response_by_index = self._index_emotion_response(data.get("lines") or [])
+
+        for position, (index, character, outfit_tag, _) in enumerate(missing, start=1):
+            base_slugs, modifier_slugs = self._scene_assets.emotions_for_outfit(
+                assets, character.codex_character_id, outfit_tag
+            )
+            base_tag, modifier_tags = self._pick_emotion(
+                response_by_index.get(position), base_slugs, modifier_slugs
+            )
+            if base_tag is None:
+                continue
+            emotion_asset_key = await self._scene_assets.match_emotion_asset(
+                character.codex_character_id, outfit_tag, [base_tag, *modifier_tags]
+            )
+            if emotion_asset_key:
+                resolved[index].emotion_asset_key = emotion_asset_key
+
+        return resolved
+
+    def _emotion_repair_prompt(
+        self,
+        missing: list[tuple[int, Character, str, str]],
+        assets: SceneAssets,
+    ) -> list[dict]:
+        system_prompt = {
+            "role": "system",
+            "content": (
+                "You fix the emotion tags of the generated dialogue lines below. "
+                "The text of each line is final and must stay unchanged; you only choose "
+                "the emotion shown on the speaker's sprite. Pick the emotion that best "
+                "matches the mood of each line, using ONLY the slugs listed for that "
+                "character's outfit in the catalog. Do not invent slugs and do not reuse "
+                "emotions of other characters or outfits.\n"
+                "For each line return:\n"
+                "1. index - the line's number as given;\n"
+                "2. emotion_base_tag - ONE base emotion slug from the catalog for that outfit;\n"
+                "3. emotion_modifier_tags - 0 or more modifier slugs from the catalog for that "
+                "outfit.\n"
+                "Answer STRICTLY as JSON matching this schema:\n"
+                """
+                {
+                  "lines": [
+                    {"index": integer, "emotion_base_tag": string, "emotion_modifier_tags": [string]}
+                  ]
+                }
+                """
+            ),
+        }
+
+        catalog_lines: list[str] = []
+        seen: set[tuple[int | None, str]] = set()
+        for _, character, outfit_tag, _ in missing:
+            key = (character.codex_character_id, outfit_tag)
+            if key in seen:
+                continue
+            seen.add(key)
+            base_slugs, modifier_slugs = self._scene_assets.emotions_for_outfit(
+                assets, character.codex_character_id, outfit_tag
+            )
+            base = ", ".join(base_slugs) or "-"
+            modifiers = ", ".join(modifier_slugs) or "-"
+            catalog_lines.append(
+                f"- {character.name} (outfit_tag {outfit_tag}): "
+                f"base: {base}; modifiers: {modifiers}"
+            )
+
+        line_items = [
+            f"{position}. {character.name} (outfit_tag {outfit_tag}): \"{text}\""
+            for position, (_, character, outfit_tag, text) in enumerate(missing, start=1)
+        ]
+
+        user_content = (
+            "Catalog (character -> outfit_tag -> emotions):\n"
+            + "\n".join(catalog_lines)
+            + "\n\nLines to fix:\n"
+            + "\n".join(line_items)
+        )
+        return [system_prompt, {"role": "user", "content": user_content}]
+
+    @staticmethod
+    def _index_emotion_response(lines_data: object) -> dict[int, dict]:
+        """Сводит ответ LLM к {index: {…}}; некорректные записи отбрасываются."""
+        by_index: dict[int, dict] = {}
+        if not isinstance(lines_data, list):
+            return by_index
+        for item in lines_data:
+            if not isinstance(item, dict):
+                continue
+            try:
+                index = int(item.get("index"))
+            except (TypeError, ValueError):
+                continue
+            by_index[index] = item
+        return by_index
+
+    @staticmethod
+    def _pick_emotion(
+        item: dict | None, base_slugs: list[str], modifier_slugs: list[str]
+    ) -> tuple[str | None, list[str]]:
+        """Проверяет выбранные LLM теги; при невалидности — детерминированный запасной."""
+        base_tag: str | None = None
+        modifier_tags: list[str] = []
+        if isinstance(item, dict):
+            base_tag = item.get("emotion_base_tag")
+            raw = item.get("emotion_modifier_tags") or []
+            if isinstance(raw, list):
+                modifier_tags = [str(m) for m in raw]
+        if base_tag not in base_slugs or not all(
+            m in modifier_slugs for m in modifier_tags
+        ):
+            base_tag = "normal" if "normal" in base_slugs else (
+                base_slugs[0] if base_slugs else None
+            )
+            modifier_tags = []
+        return base_tag, modifier_tags
 
     def __create_prompt(
         self,
@@ -248,7 +405,7 @@ class DialogueGenerator(BaseGenerator):
             system_prompt["content"] += (
                 f"\nThe protagonist is {protagonist.name}. The story is told from their point of view, "
                 "so build the dialogue around their perception, goals, and decisions. "
-                "They have no sprite or emotions on screen: for their lines do not specify a sprite, outfit, or emotions. "
+                "They have no sprite or emotions on screen: for their lines do not specify an outfit or emotions. "
                 "Their lines can be speech out loud (is_thought=false) or inner thoughts "
                 "(is_thought=true) — use inner thoughts to convey their feelings and motives."
             )
@@ -263,13 +420,14 @@ class DialogueGenerator(BaseGenerator):
                 "(usually one for the whole scene; change it only if the action moves to another place);\n"
                 "- background_modifier_tags - a list of 0 or more modifier tags from the modifier list "
                 "(time of day, inside/outside, light, people) matching the scene's time and setting;\n"
-                "- sprite_slug - the sprite of the speaking character;\n"
-                "- outfit_tag - ONE outfit style tag from the speaker's outfit list;\n"
-                "- emotion_base_tag - ONE main emotion tag of the speaker from their base emotions, "
+                "- outfit_tag - ONE outfit style tag from the speaker's outfits;\n"
+                "- emotion_base_tag - ONE main emotion tag from the base emotions of the chosen outfit, "
                 "matching the text of the line;\n"
                 "- emotion_modifier_tags - a list of 0 or more emotion modifier tags "
-                "from the speaker's modifiers.\n"
-                "For the protagonist's lines (no sprite), set null for sprite_slug, outfit_tag, "
+                "from the modifiers of the chosen outfit.\n"
+                "Pick the outfit first, then choose the emotions ONLY from the emotions "
+                "listed under that chosen outfit.\n"
+                "For the protagonist's lines (no sprite), set null for outfit_tag and "
                 "emotion_base_tag and an empty list [] for emotion_modifier_tags; "
                 "specify the background (background_base_tag and background_modifier_tags) as for other lines.\n"
                 "If there is no suitable asset, set null; for emotion_modifier_tags set an empty list [].\n"

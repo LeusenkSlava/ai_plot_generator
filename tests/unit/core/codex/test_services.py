@@ -51,26 +51,25 @@ class TestCodexService:
         client.get_backgrounds.assert_awaited_once_with(1)
         assert result == [background_domain(id=1)]
 
-    async def test_get_sprites_delegates(self, sut, client):
-        client.get_sprites.return_value = []
+    async def test_get_outfits_with_emotions_batch_delegates(self, sut, client):
+        client.get_outfits_with_emotions_batch.return_value = {7: []}
 
-        await sut.get_sprites(character_id=7)
+        result = await sut.get_outfits_with_emotions_batch([7])
 
-        client.get_sprites.assert_awaited_once_with(7)
+        client.get_outfits_with_emotions_batch.assert_awaited_once_with([7])
+        assert result == {7: []}
 
-    async def test_get_emotions_delegates(self, sut, client):
-        client.get_emotions.return_value = []
+    async def test_match_visual_delegates(self, sut, client):
+        client.match_visual.return_value = None
 
-        await sut.get_emotions(character_id=7)
+        result = await sut.match_visual(
+            character_id=7, outfit_tag="armor", emotion_tags=["calm"]
+        )
 
-        client.get_emotions.assert_awaited_once_with(7)
-
-    async def test_get_outfits_delegates(self, sut, client):
-        client.get_outfits.return_value = []
-
-        await sut.get_outfits(sprite_id=3)
-
-        client.get_outfits.assert_awaited_once_with(3)
+        client.match_visual.assert_awaited_once_with(
+            character_id=7, outfit_tag="armor", emotion_tags=["calm"]
+        )
+        assert result is None
 
     async def test_client_error_propagates(self, sut, client):
         client.get_universe.side_effect = RuntimeError("http 500")

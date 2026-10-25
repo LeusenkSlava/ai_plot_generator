@@ -1,3 +1,6 @@
+import json
+
+import httpx
 import pytest
 import respx
 
@@ -5,23 +8,15 @@ from src.core.codex.exceptions import CodexUnavailableError
 from src.core.codex.models import (
     Background,
     CodexCharacter,
-    Emotion,
-    Outfit,
-    Sprite,
     Tag,
     Universe,
+    VisualMatch,
 )
 from tests.unit.outbound.codex.factories import (
     background_domain,
     background_payload,
     character_domain,
     character_payload,
-    emotion_domain,
-    emotion_payload,
-    outfit_domain,
-    outfit_payload,
-    sprite_domain,
-    sprite_payload,
     tag_domain,
     tag_payload,
     universe_domain,
@@ -35,10 +30,8 @@ from tests.unit.outbound.codex.helpers import (
 from tests.unit.outbound.codex.routes import (
     backgrounds_url,
     characters_url,
-    emotions_url,
-    outfits_url,
-    sprites_url,
     universe_url,
+    visuals_match_url,
 )
 
 # ---------------------------------------------------------------------------
@@ -61,30 +54,6 @@ LIST_ENDPOINTS = [
         Background,
         lambda sut: sut.get_backgrounds(universe_id=1),
         id="backgrounds",
-    ),
-    pytest.param(
-        sprites_url,
-        sprite_payload,
-        sprite_domain,
-        Sprite,
-        lambda sut: sut.get_sprites(character_id=1),
-        id="sprites",
-    ),
-    pytest.param(
-        emotions_url,
-        emotion_payload,
-        emotion_domain,
-        Emotion,
-        lambda sut: sut.get_emotions(character_id=1),
-        id="emotions",
-    ),
-    pytest.param(
-        outfits_url,
-        outfit_payload,
-        outfit_domain,
-        Outfit,
-        lambda sut: sut.get_outfits(sprite_id=1),
-        id="outfits",
     ),
 ]
 
@@ -118,6 +87,83 @@ class TestGetUniverse:
 
         with pytest.raises(CodexUnavailableError, match="Codex request failed"):
             await sut.get_universe(universe_id=999)
+
+
+# ---------------------------------------------------------------------------
+# match_visual — подбор визуала (спрайт + наряд + эмоция)
+# ---------------------------------------------------------------------------
+
+
+class TestMatchVisual:
+    @respx.mock
+    async def test_returns_visual_match(self, sut):
+        respx.post(visuals_match_url(1)).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "sprite_asset_key": "sprites/alice.png",
+                    "outfit_asset_key": "outfits/red-dress.png",
+                    "emotion_asset_key": "emotions/alice-angry.png",
+                },
+            )
+        )
+
+        result = await sut.match_visual(1, "red-dress", ["angry", "soft"])
+
+        assert result == VisualMatch(
+            sprite_asset_key="sprites/alice.png",
+            outfit_asset_key="outfits/red-dress.png",
+            emotion_asset_key="emotions/alice-angry.png",
+        )
+
+    @respx.mock
+    async def test_null_emotion_asset_key(self, sut):
+        respx.post(visuals_match_url(1)).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "sprite_asset_key": "sprites/alice.png",
+                    "outfit_asset_key": "outfits/red-dress.png",
+                    "emotion_asset_key": None,
+                },
+            )
+        )
+
+        result = await sut.match_visual(1, "red-dress", ["unknown"])
+
+        assert result == VisualMatch(
+            sprite_asset_key="sprites/alice.png",
+            outfit_asset_key="outfits/red-dress.png",
+            emotion_asset_key=None,
+        )
+
+    @respx.mock
+    async def test_sends_request_body(self, sut):
+        route = respx.post(visuals_match_url(1)).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "sprite_asset_key": "sprites/alice.png",
+                    "outfit_asset_key": "outfits/red-dress.png",
+                    "emotion_asset_key": None,
+                },
+            )
+        )
+
+        await sut.match_visual(1, "red-dress", ["angry"])
+
+        assert route.call_count == 1
+        assert route.calls.last.request.method == "POST"
+        assert json.loads(route.calls.last.request.content) == {
+            "outfit_tag": "red-dress",
+            "emotion_tags": ["angry"],
+        }
+
+    @respx.mock
+    async def test_404_returns_none(self, sut):
+        respx.post(visuals_match_url(1)).mock(return_value=httpx.Response(404))
+
+        assert await sut.match_visual(1, "red-dress", []) is None
 
 
 # ---------------------------------------------------------------------------

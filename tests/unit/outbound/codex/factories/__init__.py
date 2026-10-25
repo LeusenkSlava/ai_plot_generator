@@ -11,8 +11,10 @@ from tests.unit.outbound.codex.factories.emotion import (
     emotion_payload,
 )
 from tests.unit.outbound.codex.factories.outfit import (
+    outfit_catalog_payload,
     outfit_domain,
     outfit_payload,
+    outfit_with_emotions_domain,
 )
 from tests.unit.outbound.codex.factories.sprite import (
     sprite_domain,
@@ -42,9 +44,11 @@ __all__ = [
     "emotion_payload",
     "emotion_tag_payload",
     "location_tag_payload",
+    "outfit_catalog_payload",
     "outfit_domain",
     "outfit_payload",
     "outfit_style_tag_payload",
+    "outfit_with_emotions_domain",
     "sprite_domain",
     "sprite_payload",
     "tag_domain",

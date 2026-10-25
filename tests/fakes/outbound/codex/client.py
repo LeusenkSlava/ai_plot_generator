@@ -3,12 +3,9 @@ from src.core.codex.models import (
     Background,
     BackgroundTags,
     CodexCharacter,
-    Emotion,
-    EmotionTags,
-    Outfit,
-    Sprite,
-    Tag,
+    OutfitWithEmotions,
     Universe,
+    VisualMatch,
 )
 
 
@@ -16,8 +13,8 @@ class FakeCodexService:
     """Управляемый Codex: отдаёт засеянные данные и записывает вызовы.
 
     Покрывает как генератор новеллы (universe/characters/backgrounds), так и
-    генератор диалога (sprites/emotion_tags/outfit_tags/outfits и подбор
-    match_emotion/match_outfit).
+    генератор диалога (каталог нарядов с эмоциями и подбор визуала
+    match_visual).
     """
 
     def __init__(self) -> None:
@@ -26,12 +23,10 @@ class FakeCodexService:
         self._backgrounds: dict[int, list[Background]] = {}
         self._background_tags: dict[int, BackgroundTags] = {}
 
-        self._sprites: dict[int, list[Sprite]] = {}
-        self._emotion_tags: dict[int, EmotionTags] = {}
-        self._outfit_tags: dict[int, list[Tag]] = {}
-        self._outfits: dict[int, list[Outfit]] = {}
-        self._emotion_matches: dict[int, Emotion | None] = {}
-        self._outfit_matches: dict[int, dict[str, Outfit | None]] = {}
+        self._outfits_with_emotions: dict[int, list[OutfitWithEmotions]] = {}
+        self._visual_matches: dict[
+            tuple[int, str, tuple[str, ...]], VisualMatch | None
+        ] = {}
 
         self._raise_on: set[str] = set()
         self.calls: list[tuple] = []
@@ -54,33 +49,26 @@ class FakeCodexService:
     ) -> None:
         self._background_tags[universe_id] = tags
 
-    def add_sprites(self, character_id: int, sprites: list[Sprite]) -> None:
-        self._sprites[character_id] = list(sprites)
-
-    def add_emotion_tags(self, character_id: int, tags: EmotionTags) -> None:
-        self._emotion_tags[character_id] = tags
-
-    def add_outfit_tags(self, character_id: int, tags: list[Tag]) -> None:
-        self._outfit_tags[character_id] = list(tags)
-
-    def add_outfits(self, sprite_id: int, outfits: list[Outfit]) -> None:
-        self._outfits[sprite_id] = list(outfits)
-
-    def set_match_emotion(self, character_id: int, emotion: Emotion | None) -> None:
-        """Эмоция, которую вернёт match_emotion для персонажа (или None)."""
-        self._emotion_matches[character_id] = emotion
-
-    def set_match_outfit(
-        self, sprite_id: int, tag: str, outfit: Outfit | None
+    def add_outfits_with_emotions(
+        self, character_id: int, outfits: list[OutfitWithEmotions]
     ) -> None:
-        """Наряд, который вернёт match_outfit для (sprite_id, tag)."""
-        self._outfit_matches.setdefault(sprite_id, {})[tag] = outfit
+        self._outfits_with_emotions[character_id] = list(outfits)
+
+    def set_match_visual(
+        self,
+        character_id: int,
+        outfit_tag: str,
+        emotion_tags: list[str],
+        visual: VisualMatch | None,
+    ) -> None:
+        """Визуал, который вернёт match_visual для (character_id, outfit_tag, emotion_tags)."""
+        self._visual_matches[(character_id, outfit_tag, tuple(emotion_tags))] = visual
 
     def fail_on(self, method: str) -> None:
         """Заставить указанный метод бросить ошибку.
 
-        match_emotion/match_outfit бросают CodexUnavailableError (как реальный
-        клиент), остальные методы — RuntimeError.
+        match_visual бросает CodexUnavailableError (как реальный клиент),
+        остальные методы — RuntimeError.
         """
         self._raise_on.add(method)
 
@@ -89,12 +77,8 @@ class FakeCodexService:
         self._characters.clear()
         self._backgrounds.clear()
         self._background_tags.clear()
-        self._sprites.clear()
-        self._emotion_tags.clear()
-        self._outfit_tags.clear()
-        self._outfits.clear()
-        self._emotion_matches.clear()
-        self._outfit_matches.clear()
+        self._outfits_with_emotions.clear()
+        self._visual_matches.clear()
 
     # ---------- API как у CodexService ----------
 
@@ -134,40 +118,25 @@ class FakeCodexService:
                 return background
         return None
 
-    async def get_sprites(self, character_id: int) -> list[Sprite]:
-        self.calls.append(("get_sprites", character_id))
-        if "get_sprites" in self._raise_on:
+    async def get_outfits_with_emotions_batch(
+        self, character_ids: list[int]
+    ) -> dict[int, list[OutfitWithEmotions]]:
+        self.calls.append(("get_outfits_with_emotions_batch", sorted(character_ids)))
+        if "get_outfits_with_emotions_batch" in self._raise_on:
             raise RuntimeError("codex down")
-        return list(self._sprites.get(character_id, []))
+        return {
+            character_id: list(self._outfits_with_emotions.get(character_id, []))
+            for character_id in character_ids
+        }
 
-    async def get_emotion_tags(self, character_id: int) -> EmotionTags:
-        self.calls.append(("get_emotion_tags", character_id))
-        if "get_emotion_tags" in self._raise_on:
-            raise RuntimeError("codex down")
-        return self._emotion_tags.get(character_id, EmotionTags())
-
-    async def get_outfit_tags(self, character_id: int) -> list[Tag]:
-        self.calls.append(("get_outfit_tags", character_id))
-        if "get_outfit_tags" in self._raise_on:
-            raise RuntimeError("codex down")
-        return list(self._outfit_tags.get(character_id, []))
-
-    async def get_outfits(self, sprite_id: int) -> list[Outfit]:
-        self.calls.append(("get_outfits", sprite_id))
-        if "get_outfits" in self._raise_on:
-            raise RuntimeError("codex down")
-        return list(self._outfits.get(sprite_id, []))
-
-    async def match_emotion(
-        self, character_id: int, tags: list[str], sprite_id: int | None = None
-    ) -> Emotion | None:
-        self.calls.append(("match_emotion", character_id, list(tags), sprite_id))
-        if "match_emotion" in self._raise_on:
+    async def match_visual(
+        self, character_id: int, outfit_tag: str, emotion_tags: list[str]
+    ) -> VisualMatch | None:
+        self.calls.append(
+            ("match_visual", character_id, outfit_tag, list(emotion_tags))
+        )
+        if "match_visual" in self._raise_on:
             raise CodexUnavailableError("codex down")
-        return self._emotion_matches.get(character_id)
-
-    async def match_outfit(self, sprite_id: int, tag: str) -> Outfit | None:
-        self.calls.append(("match_outfit", sprite_id, tag))
-        if "match_outfit" in self._raise_on:
-            raise CodexUnavailableError("codex down")
-        return self._outfit_matches.get(sprite_id, {}).get(tag)
+        return self._visual_matches.get(
+            (character_id, outfit_tag, tuple(emotion_tags))
+        )

@@ -1,8 +1,9 @@
-"""Сервис ассетов сцены: загрузка, каталог и резолв спрайтов/фонов/одежды/эмоций.
+"""Сервис ассетов сцены: загрузка, каталог и резолв фонов/нарядов/эмоций.
 
 Собирает из Codex всё, что нужно генератору диалога для привязки реплик к
-визуальным ассетам: теги фонов вселенной, спрайты, эмоции и наряды персонажей.
-Затем резолвит выбор LLM (slug'и и теги) в конкретные asset_key.
+визуальным ассетам: теги фонов вселенной и каталог нарядов персонажей (с
+эмоциями на каждом наряде). Затем резолвит выбор LLM (теги) в конкретные
+asset_key через подбор визуала в Codex.
 """
 
 import asyncio
@@ -12,10 +13,10 @@ from dataclasses import dataclass, field
 from src.core.codex.exceptions import CodexUnavailableError
 from src.core.codex.models import (
     BackgroundTags,
-    EmotionTags,
-    Outfit,
-    Sprite,
+    Emotion,
+    OutfitWithEmotions,
     Tag,
+    TagKind,
     TagType,
 )
 from src.core.codex.services import CodexService
@@ -32,44 +33,47 @@ def _short(text: str, limit: int = SPRITE_DESCRIPTION_MAX_CHARS) -> str:
     return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
 
 
-@dataclass
-class _SpriteAssets:
-    sprite: Sprite
-    outfits: dict[str, Outfit] = field(default_factory=dict)
+def _emotion_tags_by_kind(emotions: list[Emotion]) -> tuple[list[Tag], list[Tag]]:
+    """Разделяет emotion-теги наряда на base и modifiers."""
+    base: list[Tag] = []
+    modifiers: list[Tag] = []
+    for emotion in emotions:
+        for tag in emotion.tags:
+            if tag.type != TagType.EMOTION:
+                continue
+            if tag.kind == TagKind.MODIFIER:
+                modifiers.append(tag)
+            else:
+                base.append(tag)
+    return base, modifiers
 
 
 @dataclass
 class SceneAssets:
-    """Ассеты из Codex, доступные для сцены: теги фонов вселенной и спрайты персонажей."""
+    """Ассеты из Codex, доступные для сцены: теги фонов вселенной и наряды персонажей."""
 
     # теги фонов вселенной (базовые локации + уточнения); фон подбирается по ним
     background_tags: BackgroundTags | None = None
-    # character.id -> sprite.slug -> ассеты спрайта
-    sprites: dict[int, dict[str, _SpriteAssets]] = field(default_factory=dict)
-    # character.id -> доступные эмоции-теги (база + модификаторы)
-    emotion_tags: dict[int, EmotionTags] = field(default_factory=dict)
-    # character.id -> доступные теги одежды (outfit_style)
-    outfit_tags: dict[int, list[Tag]] = field(default_factory=dict)
+    # codex_character_id -> наряды с доступными на них эмоциями
+    outfits: dict[int, list[OutfitWithEmotions]] = field(default_factory=dict)
 
     def __bool__(self) -> bool:
-        return bool(self.background_tags or self.sprites)
+        return bool(self.background_tags or self.outfits)
 
 
 @dataclass
 class LineAssets:
-    """Подготовленные по реплике ассеты: теги фона и запросы подбора спрайта/одежды/эмоции."""
+    """Подготовленные по реплике ассеты: теги фона и запросы подбора наряда/эмоции."""
 
     # теги фона (ровно один base + 0..N modifier), выбранные LLM
     background_tags: list[str] | None = None
-    # кандидат-спрайт, выбранный LLM; используется как подсказка для match_emotion
-    sprite_id: int | None = None
     emotion_tags: list[str] | None = None
     outfit_tag: str | None = None
 
 
 @dataclass
 class ResolvedAssets:
-    """Итоговые asset_key реплики после подбора эмоции/спрайта/одежды."""
+    """Итоговые asset_key реплики после подбора визуала."""
 
     background_asset_key: str | None = None
     sprite_asset_key: str | None = None
@@ -91,35 +95,15 @@ class SceneAssetService:
         if universe_id is None:
             return assets
         try:
-            assets.background_tags = await self._codex_service.get_background_tags(
-                universe_id
+            codex_ids = [
+                c.codex_character_id
+                for c in characters
+                if not c.is_protagonist and c.codex_character_id is not None
+            ]
+            assets.background_tags, assets.outfits = await asyncio.gather(
+                self._codex_service.get_background_tags(universe_id),
+                self._codex_service.get_outfits_with_emotions_batch(codex_ids),
             )
-            for character in characters:
-                if character.is_protagonist:
-                    # У протагониста спрайт не отображается — ассеты не грузим.
-                    continue
-                if character.codex_character_id is None:
-                    continue
-                assets.emotion_tags[character.id] = (
-                    await self._codex_service.get_emotion_tags(
-                        character.codex_character_id
-                    )
-                )
-                assets.outfit_tags[character.id] = (
-                    await self._codex_service.get_outfit_tags(
-                        character.codex_character_id
-                    )
-                )
-                by_sprite: dict[str, _SpriteAssets] = {}
-                for sprite in await self._codex_service.get_sprites(
-                    character.codex_character_id
-                ):
-                    outfits = await self._codex_service.get_outfits(sprite.id)
-                    by_sprite[sprite.slug] = _SpriteAssets(
-                        sprite=sprite,
-                        outfits={o.slug: o for o in outfits},
-                    )
-                assets.sprites[character.id] = by_sprite
         except Exception as e:
             raise GenerationError(f"Codex assets request failed: {e}") from e
         return assets
@@ -128,7 +112,7 @@ class SceneAssetService:
     def prepare_line(
         item: dict, character: Character, assets: SceneAssets
     ) -> LineAssets:
-        """Переводит выбранные LLM slug'и/теги в запросы подбора ассетов Codex."""
+        """Переводит выбранные LLM теги в запросы подбора ассетов Codex."""
         line = LineAssets()
         if not assets:
             return line
@@ -139,18 +123,8 @@ class SceneAssetService:
             line.background_tags = [base_tag, *modifier_tags]
 
         if character.is_protagonist:
-            # Протагонист на экране не показывается: спрайт/наряд/эмоция не нужны.
+            # Протагонист на экране не показывается: наряд/эмоция не нужны.
             return line
-
-        sprite_assets = assets.sprites.get(character.id, {}).get(
-            item.get("sprite_slug") or ""
-        )
-        if sprite_assets:
-            line.sprite_id = sprite_assets.sprite.id
-        elif item.get("sprite_slug"):
-            logger.warning(
-                f"SceneAssetService: unresolved sprite_slug for line {item!r}"
-            )
 
         base_tag = item.get("emotion_base_tag")
         if base_tag:
@@ -161,18 +135,62 @@ class SceneAssetService:
 
         return line
 
+    @staticmethod
+    def emotions_for_outfit(
+        assets: SceneAssets, codex_character_id: int | None, outfit_tag: str
+    ) -> tuple[list[str], list[str]]:
+        """Валидные emotion-слаги наряда персонажа: (base, modifiers).
+
+        Слаги объединяются по всем сущностям-нарядам с одинаковым style-тегом —
+        именно так тег одежды резолвится в match_visual.
+        """
+        if codex_character_id is None:
+            return [], []
+        base: set[str] = set()
+        modifiers: set[str] = set()
+        for entry in assets.outfits.get(codex_character_id, []):
+            entry_tag = next(
+                (t.slug for t in entry.outfit.tags if t.type == TagType.OUTFIT_STYLE),
+                None,
+            )
+            if entry_tag != outfit_tag:
+                continue
+            base_tags, modifier_tags = _emotion_tags_by_kind(entry.emotions)
+            base.update(t.slug for t in base_tags)
+            modifiers.update(t.slug for t in modifier_tags)
+        return sorted(base), sorted(modifiers)
+
+    async def match_emotion_asset(
+        self, codex_character_id: int, outfit_tag: str, emotion_tags: list[str]
+    ) -> str | None:
+        """Подбирает только asset_key эмоции по тегу одежды и эмоциям."""
+        try:
+            visual = await self._codex_service.match_visual(
+                codex_character_id, outfit_tag, emotion_tags
+            )
+        except CodexUnavailableError as e:
+            logger.warning(
+                f"SceneAssetService: emotion match failed for "
+                f"character={codex_character_id} outfit={outfit_tag} "
+                f"emotions={emotion_tags}: {e}"
+            )
+            return None
+        if visual and visual.emotion_asset_key:
+            return visual.emotion_asset_key
+        return None
+
     async def match_assets(
         self,
         prepared: list[tuple[Character, dict, LineAssets]],
         assets: SceneAssets,
         universe_id: int | None,
     ) -> list[ResolvedAssets]:
-        """Подбирает по тегам фон, эмоцию и одежду; финальный спрайт берёт из эмоции."""
+        """Подбирает фон по тегам и визуал (спрайт+наряд+эмоцию) через Codex."""
 
         async def resolve(character: Character, line: LineAssets) -> ResolvedAssets:
             result = ResolvedAssets()
 
-            # Фон подбирается по тегам-смыслам через Codex (как эмоция/одежда).
+            # Фон подбирается по тегам-смыслам через Codex (как и визуал).
             if universe_id is not None and line.background_tags:
                 try:
                     background = await self._codex_service.match_background(
@@ -193,79 +211,39 @@ class SceneAssetService:
                     )
 
             if character.is_protagonist:
-                # Протагонист без спрайта — подбирать эмоцию/наряд не нужно.
+                # Протагонист без спрайта — подбирать визуал не нужно.
                 return result
             codex_id = character.codex_character_id
 
-            # 1. Эмоция. match_emotion может вернуть эмоцию на другом спрайте,
-            #    поэтому спрайт берём из результата, а не из выбора LLM.
-            emotion = None
-            if codex_id is not None and line.emotion_tags:
+            # Спрайт + наряд + эмоция подбираются одним запросом в Codex.
+            if codex_id is not None and line.outfit_tag:
                 try:
-                    emotion = await self._codex_service.match_emotion(
-                        codex_id, line.emotion_tags, sprite_id=line.sprite_id
+                    visual = await self._codex_service.match_visual(
+                        codex_id, line.outfit_tag, line.emotion_tags or []
                     )
                 except CodexUnavailableError as e:
                     logger.warning(
-                        f"SceneAssetService: emotion match failed for "
-                        f"{character.name} tags={line.emotion_tags}: {e}"
+                        f"SceneAssetService: visual match failed for "
+                        f"{character.name} outfit={line.outfit_tag} "
+                        f"emotions={line.emotion_tags}: {e}"
                     )
-                if emotion is None:
-                    logger.warning(
-                        f"SceneAssetService: no emotion matched for "
-                        f"{character.name} tags={line.emotion_tags}"
-                    )
-
-            # 2. Финальный спрайт: из подобранной эмоции, иначе — выбор LLM.
-            final_sprite_id = emotion.sprite_id if emotion else line.sprite_id
-            sprite_assets = self.sprite_assets_by_id(
-                character.id, final_sprite_id, assets
-            )
-            if sprite_assets:
-                result.sprite_asset_key = sprite_assets.sprite.asset_key
-
-            # 3. Одежда подбирается на финальном спрайте по одному тегу-стилю.
-            if final_sprite_id is not None and line.outfit_tag:
-                try:
-                    outfit = await self._codex_service.match_outfit(
-                        final_sprite_id, line.outfit_tag
-                    )
-                except CodexUnavailableError as e:
-                    logger.warning(
-                        f"SceneAssetService: outfit match failed for "
-                        f"{character.name} tag={line.outfit_tag} "
-                        f"sprite={final_sprite_id}: {e}"
-                    )
-                    outfit = None
-                if outfit:
-                    result.outfit_asset_key = outfit.asset_key
+                    visual = None
+                if visual:
+                    result.sprite_asset_key = visual.sprite_asset_key
+                    result.outfit_asset_key = visual.outfit_asset_key
+                    result.emotion_asset_key = visual.emotion_asset_key
                 else:
                     logger.warning(
-                        f"SceneAssetService: no outfit matched for "
-                        f"{character.name} tag={line.outfit_tag} "
-                        f"sprite={final_sprite_id}"
+                        f"SceneAssetService: no visual matched for "
+                        f"{character.name} outfit={line.outfit_tag} "
+                        f"emotions={line.emotion_tags}"
                     )
-
-            # 4. Эмоция.
-            if emotion:
-                result.emotion_asset_key = emotion.asset_key
 
             return result
 
         return await asyncio.gather(
             *(resolve(character, line) for character, _, line in prepared)
         )
-
-    @staticmethod
-    def sprite_assets_by_id(
-        character_id: int, sprite_id: int | None, assets: SceneAssets
-    ) -> _SpriteAssets | None:
-        if sprite_id is None:
-            return None
-        for sa in assets.sprites.get(character_id, {}).values():
-            if sa.sprite.id == sprite_id:
-                return sa
-        return None
 
     @staticmethod
     def current_outfits(
@@ -278,22 +256,19 @@ class SceneAssetService:
             asset_key = last_outfits.get(c.id)
             if not asset_key:
                 continue
-            for sa in assets.sprites.get(c.id, {}).values():
-                for outfit in sa.outfits.values():
-                    if outfit.asset_key == asset_key:
-                        tag = next(
-                            (
-                                t.slug
-                                for t in outfit.tags
-                                if t.type == TagType.OUTFIT_STYLE
-                            ),
-                            None,
-                        )
-                        if tag:
-                            lines.append(
-                                f"- {c.name}: outfit_tag {tag} ({outfit.name})"
-                            )
-                        break
+            for entry in assets.outfits.get(c.codex_character_id, []):
+                if entry.outfit.asset_key == asset_key:
+                    tag = next(
+                        (
+                            t.slug
+                            for t in entry.outfit.tags
+                            if t.type == TagType.OUTFIT_STYLE
+                        ),
+                        None,
+                    )
+                    if tag:
+                        lines.append(f"- {c.name}: outfit_tag {tag} ({entry.outfit.name})")
+                    break
         return "\n".join(lines)
 
     @staticmethod
@@ -316,27 +291,29 @@ class SceneAssetService:
                 f"  modifiers (0 or more background_modifier_tags): {modifiers}"
             )
         for character in characters:
-            sprites = assets.sprites.get(character.id)
-            if not sprites:
+            outfits = assets.outfits.get(character.codex_character_id)
+            if not outfits:
                 continue
-            lines.append(f"Sprites (sprite_slug) of character {character.name}:")
-            for slug, sa in sprites.items():
-                lines.append(f"- {slug}: {_short(sa.sprite.description)}")
-            tags = assets.emotion_tags.get(character.id)
-            if tags:
-                base = ", ".join(f"{t.slug}={t.name}" for t in tags.base) or "-"
+            lines.append(
+                f"Outfits of character {character.name} (outfit_tag → emotions):"
+            )
+            for entry in outfits:
+                outfit = entry.outfit
+                outfit_tag = next(
+                    (
+                        t.slug
+                        for t in outfit.tags
+                        if t.type == TagType.OUTFIT_STYLE
+                    ),
+                    None,
+                )
+                base_tags, modifier_tags = _emotion_tags_by_kind(entry.emotions)
+                base = ", ".join(f"{t.slug}={t.name}" for t in base_tags) or "-"
                 modifiers = (
-                    ", ".join(f"{t.slug}={t.name}" for t in tags.modifiers) or "-"
+                    ", ".join(f"{t.slug}={t.name}" for t in modifier_tags) or "-"
                 )
-                lines.append(f"Emotions of character {character.name}:")
-                lines.append(f"  base (emotion_base_tag): {base}")
-                lines.append(f"  modifiers (emotion_modifier_tags): {modifiers}")
-            outfit_tags = assets.outfit_tags.get(character.id)
-            if outfit_tags:
-                styles = (
-                    ", ".join(f"{t.slug}={t.name}" for t in outfit_tags) or "-"
-                )
-                lines.append(
-                    f"Outfits of character {character.name} (outfit_tag): {styles}"
-                )
+                label = f"{outfit_tag} ({outfit.name})" if outfit_tag else outfit.name
+                lines.append(f"- {label}:")
+                lines.append(f"    base (emotion_base_tag): {base}")
+                lines.append(f"    modifiers (emotion_modifier_tags): {modifiers}")
         return "\n".join(lines)
