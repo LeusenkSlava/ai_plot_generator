@@ -98,9 +98,9 @@ class SceneRoadmapValidator(BaseGenerator):
             "content": (
                 "You are the editor of an interactive visual novel. Check whether the "
                 "generated scene matches the current roadmap step BY MEANING. Judge strictly on three axes:\n"
-                "1. theme_match — theme/event: the scene moves the plot toward the step's goal "
-                "(toward what should happen in this step), rather than replaying what already passed "
-                "or fulfilling the goal of another step;\n"
+                "1. theme_match — theme/event: the scene moves the plot toward the step's event, "
+                "carries the step's conflict, and reaches the step's change, rather than replaying what "
+                "already passed or fulfilling the event of another step;\n"
                 "2. location_match — place: the scene takes place in the location set by the step "
                 "(or logically continues it), not in another location;\n"
                 "3. time_match — time: the scene takes place in the day/stage set by the step "
@@ -124,7 +124,9 @@ class SceneRoadmapValidator(BaseGenerator):
         }
         user_content = (
             f"Roadmap step: {roadmap.title}\n"
-            f"Step goal: {roadmap.goal}\n"
+            f"Step event: {roadmap.event}\n"
+            f"Step conflict: {roadmap.conflict}\n"
+            f"Step change: {roadmap.change}\n"
             f"Step location: {roadmap.location_slug or 'not set'}\n"
             f"Step time of day: {roadmap.time_of_day or 'not set'}\n"
             f"Step day: {roadmap.day if roadmap.day is not None else 'not set'}"

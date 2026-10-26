@@ -5,11 +5,10 @@ import time
 from json_repair import repair_json
 from openai import APIConnectionError, APIError, AsyncOpenAI
 
+from src.main.config.settings import settings
 from src.outbound.ai.llm_log import log_llm_call
 
 logger = logging.getLogger(__name__)
-
-MODEL = "deepseek-v4-flash"
 
 
 def _is_truncated(text: str) -> bool:
@@ -46,9 +45,15 @@ def _is_truncated(text: str) -> bool:
 
 
 class DeepSeekGenerator:
-    def __init__(self, client: AsyncOpenAI, temperature: float = 0.9):
+    def __init__(
+        self,
+        client: AsyncOpenAI,
+        temperature: float = 0.9,
+        model: str = settings.deepseek.MODEL,
+    ):
         self._client = client
         self._temperature = temperature
+        self._model = model
 
     async def generate(
         self,
@@ -59,10 +64,12 @@ class DeepSeekGenerator:
     ) -> dict:
         started = time.monotonic()
         request = {
-            "model": MODEL,
+            "model": self._model,
             "messages": prompt,
             "response_format": {"type": "json_object"},
-            "temperature": temperature if temperature is not None else self._temperature,
+            "temperature": (
+                temperature if temperature is not None else self._temperature
+            ),
             "extra_body": {"thinking": {"type": "enabled" if think else "disabled"}},
         }
 
@@ -72,7 +79,7 @@ class DeepSeekGenerator:
             response = await self._client.chat.completions.create(**request)
         except (APIError, APIConnectionError) as e:
             log_llm_call(
-                model=MODEL,
+                model=self._model,
                 messages=prompt,
                 response=None,
                 prompt_tokens=None,
@@ -113,7 +120,7 @@ class DeepSeekGenerator:
         if json_repaired:
             extra["json_repaired"] = True
         log_llm_call(
-            model=MODEL,
+            model=self._model,
             messages=prompt,
             response=content,
             prompt_tokens=usage.prompt_tokens if usage else None,

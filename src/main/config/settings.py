@@ -20,6 +20,10 @@ class PostgresSettings(BaseModel):
     USER: str
     PASSWORD: str
 
+    POOL_SIZE: int = 10
+    MAX_OVERFLOW: int = 10
+    POOL_TIMEOUT_S: int = 30
+
     @property
     def dsn(self) -> str:
         return PostgresDsn.build(
@@ -36,26 +40,32 @@ class DeepSeekSettings(BaseSettings):
     API_KEY: str
     BASE_URL: str = "https://api.deepseek.com"
     TEMPERATURE: float = 0.9
-    # Отдельная температура для диалогов: выше — разнообразнее и живее реплики.
-    # 1.5 даёт слишком частый невалидный JSON, поэтому держим в безопасном диапазоне.
+
     DIALOGUE_TEMPERATURE: float = 1.0
+
+    # Модель по умолчанию
+    MODEL: str = "deepseek-flash"
+
+    NOVEL_MODEL: str = "deepseek-v4-pro"
+    ROADMAP_MODEL: str = "deepseek-v4-pro"
+    SCENE_MODEL: str = "deepseek-v4-pro"
 
     NOVEL_REASONING_EFFORT: str = "high"
     CHARACTER_REASONING_EFFORT: str = "low"
     ROADMAP_REASONING_EFFORT: str = "low"
     DIALOGUE_REASONING_EFFORT: str = "low"
 
-    # Тумблеры thinking mode (deepseek). False = thinking выключен, reasoning
-    # не генерируется и не тарифицируется. На структурированных JSON-шагах
-    # (персонажи, роадмап) мышление почти не даёт прироста качества, но жжёт
-    # ~40-50% выходных токенов.
+    # Тумблеры thinking mode
     CHARACTER_THINK: bool = False
     ROADMAP_THINK: bool = True
     DIALOGUE_THINK: bool = True
 
     SCENE_VALIDATION_RETRIES: int = 3
-    # Лимит полных ретраев диалога при неисправимых дефектах (после точечного ремонта).
     DIALOGUE_VALIDATION_RETRIES: int = 3
+
+    # Таймаут одного вызова и число ретраев SDK (429/5xx/сетевые ошибки).
+    TIMEOUT_S: float = 300.0
+    MAX_RETRIES: int = 3
 
 
 class CodexSettings(BaseSettings):
@@ -74,6 +84,10 @@ class KafkaSettings(BaseSettings):
     BOOTSTRAP_SERVERS: str = "kafka:9092"
     CLIENT_ID: str = "ai_plot_generator_client"
     GROUP_ID: str = "ai-plot"
+
+    # Максимальный интервал между poll(). При долгой генерации пул занят и мы не
+    # поллим, поэтому поднимаем, чтобы координатор не выкидывал консьюмера из группы.
+    MAX_POLL_INTERVAL_MS: int = 900000
 
 
 class AnalyticsSettings(BaseSettings):
@@ -94,6 +108,24 @@ class AnalyticsSettings(BaseSettings):
     QUEUE_SIZE: int = 10000
 
 
+class GenerationSettings(BaseModel):
+    """Параллельная обработка задач генерации."""
+
+    # Максимум одновременно обрабатываемых сообщений. DeepSeek допускает до 500
+    # (pro) / 2500 (flash) одновременных запросов на аккаунт, поэтому реальное
+    # узкое место — пул Postgres: каждый джоб держит соединение всё время
+    # генерации (для сцен — ещё и advisory-блокировку до конца транзакции).
+    # Значение должно быть <= POSTGRES__POOL_SIZE, чтобы джобы генерации не
+    # вытесняли HTTP API из пула; POSTGRES__MAX_OVERFLOW — это запас на пики,
+    # а не постоянный потолок параллелизма.
+    MAX_CONCURRENCY: int = 10
+    # Ретраи сообщения при транзиентных ошибках; после исчерпания — в DLQ.
+    MAX_RETRIES: int = 3
+    RETRY_BASE_DELAY_S: float = 1.0
+    RETRY_MAX_DELAY_S: float = 30.0
+    DLQ_TOPIC: str = "ai_plot.generation.dlq"
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -107,6 +139,7 @@ class Settings(BaseSettings):
     codex: CodexSettings = CodexSettings()
     redis: RedisSettings = RedisSettings()
     analytics: AnalyticsSettings = AnalyticsSettings()
+    generation: GenerationSettings = GenerationSettings()
 
 
 settings = Settings()

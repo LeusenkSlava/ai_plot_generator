@@ -152,16 +152,24 @@ uv run pytest
 |---|---|---|
 | `POSTGRES__DB`, `POSTGRES__HOST`, `POSTGRES__PORT` | да | подключение к Postgres |
 | `POSTGRES__USER`, `POSTGRES__PASSWORD` | да | учётные данные Postgres (кладутся в `.secrets`) |
+| `POSTGRES__POOL_SIZE`, `POSTGRES__MAX_OVERFLOW`, `POSTGRES__POOL_TIMEOUT_S` | нет | пул соединений: размер / overflow / таймаут взятия (по умолчанию `10` / `10` / `30`) |
 | `DEEPSEEK__API_KEY` | да | ключ DeepSeek (кладётся в `.secrets`) |
 | `DEEPSEEK__BASE_URL` | нет | по умолчанию `https://api.deepseek.com` |
+| `DEEPSEEK__TIMEOUT_S` | нет | таймаут одного вызова LLM, сек (по умолчанию `300`) |
+| `DEEPSEEK__MAX_RETRIES` | нет | число ретраев SDK на 429/5xx/сетевые (по умолчанию `3`) |
 | `KAFKA__BOOTSTRAP_SERVERS` | нет | по умолчанию `kafka:9092` |
 | `KAFKA__GROUP_ID` | нет | consumer group (по умолчанию `ai-plot`) |
 | `KAFKA__CLIENT_ID` | нет | client id (по умолчанию `ai_plot_generator_client`) |
+| `KAFKA__MAX_POLL_INTERVAL_MS` | нет | макс. интервал между poll, мс (по умолчанию `900000`) |
 | `CODEX__BASE_URL` | нет | адрес сервиса Codex (по умолчанию в коде `http://codex.localhost`) |
 | `CODEX__TIMEOUT` | нет | таймаут запросов к Codex, сек (по умолчанию `10`) |
 | `APP__LOGGING_LEVEL` | нет | уровень логирования (по умолчанию `INFO`) |
 | `APP__DEBUG_MODE` | нет | debug-режим (по умолчанию `false`) |
 | `APP__ROOT_PATH` | нет | root path приложения за прокси (по умолчанию `/`) |
+| `GENERATION__MAX_CONCURRENCY` | нет | максимум одновременно обрабатываемых команд генерации (по умолчанию `10`) |
+| `GENERATION__MAX_RETRIES` | нет | ретраи сообщения при транзиентных ошибках (по умолчанию `3`) |
+| `GENERATION__RETRY_BASE_DELAY_S`, `GENERATION__RETRY_MAX_DELAY_S` | нет | экспоненциальный backoff ретраев (по умолчанию `1.0` / `30.0`) |
+| `GENERATION__DLQ_TOPIC` | нет | топик для «мёртвых» сообщений (по умолчанию `ai_plot.generation.dlq`) |
 
 ## API
 
@@ -191,7 +199,11 @@ uv run pytest
 ## Kafka
 
 Сервис слушает топики `ai_plot.novel.generate` и `ai_plot.scene.generate` (consumer group `ai-plot`)
-и на каждую команду отвечает в `generation.results`. Offset коммитится вручную, только после отправки ответа.
+и на каждую команду отвечает в `generation.results`. Команды обрабатываются параллельно ограниченным
+пулом (`GENERATION__MAX_CONCURRENCY`); offset коммитится вручную по водяному знаку непрерывно
+завершённого префикса партиции (at-least-once). Сцены одной новеллы сериализуются по `novel_id`,
+разные новеллы генерируются параллельно. После исчерпания ретраев сообщение уходит в DLQ-топик
+`GENERATION__DLQ_TOPIC`.
 
 Сгенерировать новеллу:
 

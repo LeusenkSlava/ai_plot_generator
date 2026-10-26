@@ -31,7 +31,9 @@ class Roadmap:
     novel_id: int
     step_id: int
     title: str
-    goal: str
+    event: str
+    conflict: str
+    change: str
     target_choice: bool
     choice_stakes: str | None
     scenes_count: int
@@ -122,6 +124,7 @@ class DialogueLine:
 
     # asset_key ассетов Codex; заполняются только для новелл с universe_id
     background_asset_key: str | None = None
+    sound_asset_key: str | None = None
     sprite_asset_key: str | None = None
     outfit_asset_key: str | None = None
     emotion_asset_key: str | None = None

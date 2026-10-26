@@ -35,6 +35,7 @@ def background_domain(
     slug: str = "forest",
     description: str = "Лес",
     asset_key: str = "bg/forest.png",
+    sound_asset_key: str | None = None,
 ) -> Background:
     return Background(
         id=id,
@@ -42,4 +43,5 @@ def background_domain(
         slug=slug,
         description=description,
         asset_key=asset_key,
+        sound_asset_key=sound_asset_key,
     )

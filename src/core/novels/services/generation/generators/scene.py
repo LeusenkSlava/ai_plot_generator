@@ -266,8 +266,11 @@ class SceneGenerator(BaseGenerator):
             "role": "user",
             "content": (
                 f"The scene does not fit the current roadmap step. Return to the step "
-                f"«{roadmap.title}» (goal: {roadmap.goal}) and rewrite the scene so that "
+                f"«{roadmap.title}» and rewrite the scene so that "
                 "it matches it on three axes:\n"
+                f"Step event: {roadmap.event}\n"
+                f"Step conflict: {roadmap.conflict}\n"
+                f"Step change: {roadmap.change}\n"
                 "- theme/event — what should happen in this step;\n"
                 "- place — the location where the step takes place;\n"
                 "- time — the day/stage in which the step takes place.\n"
@@ -305,10 +308,10 @@ class SceneGenerator(BaseGenerator):
                 "You are a screenwriter for interactive visual novels. "
                 "Based on the description of the story and the current roadmap step, create the next scene of this step. "
                 "It should continue the previous scenes without repeating them "
-                "and move the plot toward the step's goal. "
-                "The scene should unfold the step's goal and establish the place and situation of the action, "
-                "but not retell the dialogues themselves. If the scene is a climax, specify in the description "
-                "a concrete crisis or obstacle within the event, not just its outcome. Specify:\n"
+                "and move the plot toward the step's event — carry its conflict and reach its change. "
+                "The scene should unfold the step's event and establish the place and situation of the action, "
+                "but not retell the dialogues themselves. Put the step's conflict into the description as a "
+                "concrete crisis or obstacle (what makes the event hard), not just its outcome. Specify:\n"
                 "1. title - a short title for the scene.\n"
                 "2. description - a description of the place, time, situation, and conflict of the scene, "
                 "from which the characters' dialogues will then be generated: "
@@ -356,7 +359,9 @@ class SceneGenerator(BaseGenerator):
         # динамического изложения и предыдущих сцен.
         user_content += (
             f"\n\nRoadmap step: {roadmap.title}\n"
-            f"Step goal: {roadmap.goal}\n"
+            f"Step event: {roadmap.event}\n"
+            f"Step conflict: {roadmap.conflict}\n"
+            f"Step change: {roadmap.change}\n"
             f"Scene number within the step: {step_position} of {scenes_count}"
         )
         if story_context:

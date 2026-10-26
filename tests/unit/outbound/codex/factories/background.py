@@ -9,6 +9,7 @@ def background_payload(
     slug: str = "forest",
     description: str = "Лес",
     asset_key: str = "bg/forest.png",
+    sound_asset_key: str | None = None,
     tags: list[dict] | None = None,
 ) -> dict:
     return BackgroundSchema(
@@ -17,6 +18,7 @@ def background_payload(
         slug=slug,
         description=description,
         asset_key=asset_key,
+        sound_asset_key=sound_asset_key,
         tags=[TagSchema(**t) for t in (tags or [])],
     ).model_dump(mode="json")
 
@@ -28,6 +30,7 @@ def background_domain(
     slug: str = "forest",
     description: str = "Лес",
     asset_key: str = "bg/forest.png",
+    sound_asset_key: str | None = None,
     tags: list[Tag] | None = None,
 ) -> Background:
     return Background(
@@ -36,5 +39,6 @@ def background_domain(
         slug=slug,
         description=description,
         asset_key=asset_key,
+        sound_asset_key=sound_asset_key,
         tags=tags or [],
     )

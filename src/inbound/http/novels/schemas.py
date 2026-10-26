@@ -42,6 +42,7 @@ class DialogueLineResponse(BaseModel):
     is_final_for_scene: bool
     is_thought: bool
     background_asset_key: str | None
+    sound_asset_key: str | None
     sprite_asset_key: str | None
     outfit_asset_key: str | None
     emotion_asset_key: str | None

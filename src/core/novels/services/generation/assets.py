@@ -76,6 +76,7 @@ class ResolvedAssets:
     """Итоговые asset_key реплики после подбора визуала."""
 
     background_asset_key: str | None = None
+    sound_asset_key: str | None = None
     sprite_asset_key: str | None = None
     outfit_asset_key: str | None = None
     emotion_asset_key: str | None = None
@@ -204,6 +205,7 @@ class SceneAssetService:
                     background = None
                 if background:
                     result.background_asset_key = background.asset_key
+                    result.sound_asset_key = background.sound_asset_key
                 else:
                     logger.warning(
                         f"SceneAssetService: no background matched for "

@@ -106,9 +106,29 @@ class NovelGenerators:
 def build_novel_generators(
     services: NovelDomainServices,
 ) -> NovelGenerators:
-    generator = DeepSeekGenerator(
-        client=build_deepseek_client(),
+    client = build_deepseek_client()
+
+    # «Творческие» шаги (замысел новеллы, роадмап и сцены) — на более мощной
+    # pro-модели, остальные структурированные шаги — на дефолтной flash-модели.
+    novel_generator = DeepSeekGenerator(
+        client=client,
         temperature=settings.deepseek.TEMPERATURE,
+        model=settings.deepseek.NOVEL_MODEL,
+    )
+    roadmap_generator = DeepSeekGenerator(
+        client=client,
+        temperature=settings.deepseek.TEMPERATURE,
+        model=settings.deepseek.ROADMAP_MODEL,
+    )
+    scene_generator = DeepSeekGenerator(
+        client=client,
+        temperature=settings.deepseek.TEMPERATURE,
+        model=settings.deepseek.SCENE_MODEL,
+    )
+    generator = DeepSeekGenerator(
+        client=client,
+        temperature=settings.deepseek.TEMPERATURE,
+        model=settings.deepseek.MODEL,
     )
     codex_service = CodexService(
         HttpCodexClient(
@@ -125,7 +145,7 @@ def build_novel_generators(
         novel=NovelGenerator(
             novel_service=services.novel,
             codex_service=codex_service,
-            generator=generator,
+            generator=novel_generator,
             reasoning_effort=settings.deepseek.NOVEL_REASONING_EFFORT,
         ),
         character=CharacterGenerator(
@@ -141,7 +161,7 @@ def build_novel_generators(
             roadmap_service=services.roadmap,
             character_service=services.character,
             codex_service=codex_service,
-            generator=generator,
+            generator=roadmap_generator,
             reasoning_effort=settings.deepseek.ROADMAP_REASONING_EFFORT,
             think=settings.deepseek.ROADMAP_THINK,
         ),
@@ -150,7 +170,9 @@ def build_novel_generators(
             roadmap_service=services.roadmap,
             scene_service=services.scene,
             character_service=services.character,
-            generator=generator,
+            generator=scene_generator,
+            # Валидатор сцены — дешёвая смысловая сверка со структурированным
+            # JSON-ответом; оставляем на flash, чтобы не жечь pro на проверки.
             validator=SceneRoadmapValidator(generator=generator),
             max_validation_retries=settings.deepseek.SCENE_VALIDATION_RETRIES,
         ),

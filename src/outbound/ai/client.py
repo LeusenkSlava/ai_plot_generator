@@ -11,6 +11,8 @@ def build_deepseek_client() -> AsyncOpenAI:
         _client = AsyncOpenAI(
             api_key=settings.deepseek.API_KEY,
             base_url=settings.deepseek.BASE_URL,
+            timeout=settings.deepseek.TIMEOUT_S,
+            max_retries=settings.deepseek.MAX_RETRIES,
         )
     return _client
 

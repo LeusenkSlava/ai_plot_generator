@@ -82,7 +82,9 @@ async def _build_sut(
 def _step(*, location="aidpost", time="day", day=1, **extra) -> dict:
     step = {
         "title": "Шаг",
-        "goal": "Цель",
+        "event": "Событие",
+        "conflict": "Конфликт",
+        "change": "Изменение",
         "scenes_count": 2,
         "location_slug": location,
         "time_of_day": time,
@@ -108,7 +110,7 @@ class TestRoadmapPlaceTime:
         generator.assert_system_contains("location_slug", "time_of_day", "day")
 
     async def test_system_prompt_constrains_goal_to_cast(self):
-        """goal не должен упоминать персонажей вне каста — иначе сцены падают на проверке."""
+        """event/conflict/change не должны упоминать персонажей вне каста — иначе сцены падают на проверке."""
         codex = FakeCodexService()
         codex.add_background_tags(1, _tags())
         generator = FakeGenerator().always_returns({"roadmap": [_step()]})
@@ -118,7 +120,7 @@ class TestRoadmapPlaceTime:
 
         generator.assert_system_contains(
             "only on the characters from the list",
-            "do not mention in goal characters",
+            "do not mention in event, conflict, or change",
         )
 
     async def test_system_prompt_guides_structure(self):

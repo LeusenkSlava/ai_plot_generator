@@ -80,7 +80,9 @@ class RoadmapGenerator(BaseGenerator):
                 novel_id=novel.id,
                 step_id=step_id,
                 title=item["title"],
-                goal=item["goal"],
+                event=(item.get("event") or "").strip(),
+                conflict=(item.get("conflict") or "").strip(),
+                change=(item.get("change") or "").strip(),
                 # MVP: новеллы линейные, развилок не генерируем
                 target_choice=False,
                 choice_stakes=None,
@@ -135,16 +137,20 @@ class RoadmapGenerator(BaseGenerator):
                 "rather than repeat the previous one. "
                 "For each step, specify:\n"
                 "1. title - a short title for the step.\n"
-                "2. goal - ONE completed event/beat that happens in this step; "
+                "2. event - ONE completed event/beat that happens in this step; "
                 "do not stretch the step over a whole arc — it should fit into 1–2 scenes.\n"
-                "3. scenes_count - 1 or 2 for a regular step; the final step and steps with a character's "
+                "3. conflict - what makes this event hard for the protagonist: an obstacle, a contradiction, "
+                "a risk, or what is at stake; the scene must be able to dramatize it.\n"
+                "4. change - what changes for the protagonist by the end of the step: a decision, a feeling, "
+                "or a shift in a relationship; one concrete consequence.\n"
+                "5. scenes_count - 1 or 2 for a regular step; the final step and steps with a character's "
                 "resolution may have 2 or 3. Use 2/3 only if each scene has its own "
                 "beat, otherwise the scene will replay the previous one.\n"
-                "4. location_slug - the slug of the location where the step takes place, ONLY from the location list "
+                "6. location_slug - the slug of the location where the step takes place, ONLY from the location list "
                 "(empty string if there is no list).\n"
-                "5. time_of_day - the slug of the step's time of day, ONLY from the time-of-day list "
+                "7. time_of_day - the slug of the step's time of day, ONLY from the time-of-day list "
                 "(empty string if there is no list).\n"
-                "6. day - the story day number: an integer from 1, non-decreasing between steps; "
+                "8. day - the story day number: an integer from 1, non-decreasing between steps; "
                 "if the step takes place on the same day as the previous one, use the same number.\n"
                 "The story structure is Harmon's story circle of 8 beats. Keep this order; "
                 "do not rearrange or skip beats:\n"
@@ -167,19 +173,28 @@ class RoadmapGenerator(BaseGenerator):
                 "beats 4–6 can stretch over 2 steps. For significant characters (ally, rival, "
                 "love interest) carry a mini-arc within these beats and resolve it by beats 7–8, "
                 "not by appearing in a single scene.\n"
+                "Track when each significant character first enters the story. The first time a significant "
+                "character appears, dedicate a step to establishing the meeting: where and how the protagonist "
+                "meets them and what makes them start interacting. Do not write a step whose event already assumes "
+                "an established relationship (someone already teaching, helping, or being close to the protagonist) "
+                "unless an earlier step introduced them and set up that interaction. Treat the story premise "
+                "(a lesson, friendship, romance) as a goal to build toward across the arc, not as the starting "
+                "state of its first related scene.\n"
                 "Spread the action across place and time: do not keep the whole story in one location "
                 "unless the plot requires it; two adjacent steps must not take place in the same location "
                 "without a plot reason. Every scene within a step must match the step's place and day.\n"
-                "Build goal only on the characters from the list below; do not mention in goal characters "
-                "who are not in the list (even if they exist in the universe) — scenes with such "
-                "characters will not pass validation and will be regenerated.\n"
+                "Build event/conflict/change only on the characters from the list below; do not mention in "
+                "event, conflict, or change characters who are not in the list (even if they exist in the "
+                "universe) — scenes with such characters will not pass validation and will be regenerated.\n"
                 "Answer STRICTLY as JSON matching this schema:\n"
                 """
                 {
                   "roadmap": [
                     {
                       "title": string,
-                      "goal": string,
+                      "event": string,
+                      "conflict": string,
+                      "change": string,
                       "scenes_count": integer,
                       "location_slug": string,
                       "time_of_day": string,

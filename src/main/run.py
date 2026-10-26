@@ -9,6 +9,8 @@ from src.inbound.http.root_router import make_fastapi_root_router
 from src.inbound.kafka.consumer import build_consumer
 from src.inbound.kafka.handlers import build_topic_handlers
 from src.inbound.kafka.tasks.consume_loop import consume_loop
+from src.inbound.kafka.tasks.keyed_locks import KeyedLocks
+from src.inbound.kafka.tasks.offset_tracker import OffsetTracker
 from src.main.config.logging import setup_logging
 from src.main.config.settings import settings
 from src.main.setup.background_tasks import BackgroundTaskRunner
@@ -19,6 +21,7 @@ from src.outbound.cache.client import build_redis_client, close_redis_client
 from src.outbound.codex.client import build_codex_client, close_codex_client
 from src.outbound.database.session import engine
 from src.outbound.kafka.producer import build_producer
+from src.outbound.kafka.producers.dlq_sender import DlqSender
 
 setup_logging()
 
@@ -45,14 +48,29 @@ async def lifespan(app: FastAPI):
     set_usage_publisher(usage_sink)
     await usage_sink.start()
 
-    consumer = build_consumer()
+    # Общий трекер оффсетов: используется и ребаланс-листенером (сброс при
+    # отзыве партиций), и самим consume_loop (водяной знак коммитов).
+    tracker = OffsetTracker()
+    consumer = build_consumer(tracker)
     await consumer.start()
+
+    keyed_locks = KeyedLocks()
+    dlq_sender = DlqSender(producer, settings.generation.DLQ_TOPIC)
 
     background_tasks = BackgroundTaskRunner()
     background_tasks.start_all(
         {
             "consume_loop": partial(
-                consume_loop, consumer, build_topic_handlers(producer)
+                consume_loop,
+                consumer,
+                build_topic_handlers(producer),
+                concurrency=settings.generation.MAX_CONCURRENCY,
+                max_retries=settings.generation.MAX_RETRIES,
+                retry_base_delay_s=settings.generation.RETRY_BASE_DELAY_S,
+                retry_max_delay_s=settings.generation.RETRY_MAX_DELAY_S,
+                keyed_locks=keyed_locks,
+                dlq=dlq_sender,
+                tracker=tracker,
             ),
         }
     )

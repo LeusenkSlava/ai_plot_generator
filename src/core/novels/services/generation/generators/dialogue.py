@@ -206,6 +206,7 @@ class DialogueGenerator(BaseGenerator):
                     else False
                 ),
                 background_asset_key=assets_picked.background_asset_key,
+                sound_asset_key=assets_picked.sound_asset_key,
                 sprite_asset_key=assets_picked.sprite_asset_key,
                 outfit_asset_key=assets_picked.outfit_asset_key,
                 emotion_asset_key=assets_picked.emotion_asset_key,

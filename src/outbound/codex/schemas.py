@@ -35,6 +35,7 @@ class BackgroundSchema(BaseModel):
     slug: str
     description: str
     asset_key: str
+    sound_asset_key: str | None = None
     tags: list[TagSchema] = []
 
 

@@ -75,7 +75,7 @@ def seed_codex(codex: FakeCodexService) -> None:
         [
             background_domain(
                 id=1, universe_id=1, slug="forest", description="Лес",
-                asset_key="bg/forest.png",
+                asset_key="bg/forest.png", sound_asset_key="sounds/forest.ogg",
             )
         ],
     )
@@ -436,6 +436,7 @@ class TestGenerateWithUniverse:
 
         assert alice_line.character_id == world.alice.id
         assert alice_line.background_asset_key == "bg/forest.png"
+        assert alice_line.sound_asset_key == "sounds/forest.ogg"
         assert alice_line.sprite_asset_key == "sprites/alice.png"
         assert alice_line.outfit_asset_key == "outfits/red-dress.png"
         assert alice_line.emotion_asset_key == "emotions/alice-angry.png"
@@ -443,6 +444,7 @@ class TestGenerateWithUniverse:
 
         assert bob_line.character_id == world.bob.id
         assert bob_line.background_asset_key == "bg/forest.png"
+        assert bob_line.sound_asset_key == "sounds/forest.ogg"
         assert bob_line.sprite_asset_key == "sprites/bob.png"
         assert bob_line.outfit_asset_key == "outfits/armor.png"
         assert bob_line.emotion_asset_key == "emotions/bob-calm.png"
@@ -942,6 +944,7 @@ class TestProtagonist:
         alice_line = result[0]
         assert alice_line.character_id == protagonist_world.alice.id
         assert alice_line.background_asset_key == "bg/forest.png"
+        assert alice_line.sound_asset_key == "sounds/forest.ogg"
         assert alice_line.sprite_asset_key is None
         assert alice_line.outfit_asset_key is None
         assert alice_line.emotion_asset_key is None
