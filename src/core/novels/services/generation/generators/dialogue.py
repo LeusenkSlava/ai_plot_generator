@@ -35,6 +35,7 @@ from src.core.novels.services.generation.prompts.cast import (
     find_protagonist,
     render_cast,
 )
+from src.core.novels.services.generation.prompts.context import render_place_time
 from src.core.novels.services.generation.prompts.text import RUSSIAN_OUTPUT_NOTE
 from src.core.novels.services.generation.transactions import (
     TransactionFactory,
@@ -85,6 +86,7 @@ class DialogueGenerator(BaseGenerator):
         previous_lines: list[DialogueLine] | None = None,
         story_context: str | None = None,
         all_lines: list[DialogueLine] | None = None,
+        previous_scene: Scene | None = None,
         *,
         step: TransactionFactory = noop_step,
     ) -> list[DialogueLine]:
@@ -139,6 +141,7 @@ class DialogueGenerator(BaseGenerator):
             story_context,
             current_outfits,
             used_phrases,
+            previous_scene,
         )
 
         valid_names = [c.name for c in characters]
@@ -308,6 +311,7 @@ class DialogueGenerator(BaseGenerator):
         story_context: str | None,
         current_outfits: str,
         used_phrases: list[str],
+        previous_scene: Scene | None,
     ) -> list[dict]:
         # Полный каст в фиксированном порядке — стабильная голова промпта для кэша.
         cast = render_cast(all_characters)
@@ -329,6 +333,10 @@ class DialogueGenerator(BaseGenerator):
                 "Do not summarize the climax (a performance, a confession, a decisive act) as an outcome: "
                 "show it beat by beat — at least one crisis moment within the event and its resolution, "
                 "before it concludes. "
+                "Open the scene so it continues from the previous one: if the story picks up in the same place "
+                "and moment, continue from where it left off; if the time or place has changed, ground the reader "
+                "with a short transition (where the protagonist is now, how they got here, or what brought them) "
+                "before the conversation gets going. "
                 + self.__choice_hint(roadmap)
                 + "For each line, specify:\n"
                 "1. character_name - the name of the speaking character, exactly as in the list.\n"
@@ -392,6 +400,12 @@ class DialogueGenerator(BaseGenerator):
             )
         if current_outfits:
             user_content += f"\n\nCurrent character outfits:\n{current_outfits}"
+        if previous_scene is not None:
+            user_content += (
+                "\n\nPrevious scene (where the story left off): "
+                f"{previous_scene.title} — "
+                f"{render_place_time(previous_scene.location_slug, previous_scene.time_of_day, previous_scene.day)}."
+            )
         if previous_lines:
             names = {character.id: character.name for character in all_characters}
             recap = "\n".join(
@@ -408,6 +422,10 @@ class DialogueGenerator(BaseGenerator):
             )
         user_content += (
             f"\n\nScene: {scene.title}\nScene description: {scene.description}"
+        )
+        user_content += (
+            "\nThis scene takes place at: "
+            f"{render_place_time(scene.location_slug, scene.time_of_day, scene.day)}."
         )
         user_content += f"\nScene participants: {scene_participants}"
         system_prompt["content"] += f"\n{RUSSIAN_OUTPUT_NOTE}"

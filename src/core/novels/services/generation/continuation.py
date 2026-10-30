@@ -139,6 +139,7 @@ class SceneContinuationService:
                 previous_lines=state.previous_dialogue_lines,
                 story_context=story_text,
                 all_lines=state.dialogue_lines,
+                previous_scene=state.last_scenes[-1] if state.last_scenes else None,
                 step=step,
             )
 
