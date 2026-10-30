@@ -15,6 +15,10 @@ from src.core.novels.services.crud import (
 )
 from src.core.novels.services.generation.generators.base import BaseGenerator
 from src.core.novels.services.generation.prompts.text import RUSSIAN_OUTPUT_NOTE
+from src.core.novels.services.generation.transactions import (
+    TransactionFactory,
+    noop_step,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -280,22 +284,31 @@ class StoryContextGenerator(BaseGenerator):
         self._character_service = character_service
         self._dialogue_line_service = dialogue_line_service
 
-    async def generate(self, scene_id: int, previous_context: str | None = None) -> str:
-        scene = await self._scene_service.get(scene_id)
-        if not scene:
-            raise GenerationError(f"Scene with id {scene_id} not found")
+    async def generate(
+        self,
+        scene_id: int,
+        previous_context: str | None = None,
+        *,
+        step: TransactionFactory = noop_step,
+    ) -> str:
+        # 1) Read-фаза: короткая транзакция.
+        async with step():
+            scene = await self._scene_service.get(scene_id)
+            if not scene:
+                raise GenerationError(f"Scene with id {scene_id} not found")
 
-        roadmap = await self._roadmap_service.get(scene.roadmap_id)
-        if not roadmap:
-            raise GenerationError(f"Roadmap with id {scene.roadmap_id} not found")
+            roadmap = await self._roadmap_service.get(scene.roadmap_id)
+            if not roadmap:
+                raise GenerationError(f"Roadmap with id {scene.roadmap_id} not found")
 
-        novel = await self._novel_service.get(roadmap.novel_id)
-        if not novel:
-            raise GenerationError(f"Novel with id {roadmap.novel_id} not found")
+            novel = await self._novel_service.get(roadmap.novel_id)
+            if not novel:
+                raise GenerationError(f"Novel with id {roadmap.novel_id} not found")
 
-        characters = await self._character_service.list_by_novel(novel.id) or []
-        lines = await self._dialogue_line_service.list_by_scene(scene.id)
+            characters = await self._character_service.list_by_novel(novel.id) or []
+            lines = await self._dialogue_line_service.list_by_scene(scene.id)
 
+        # 2) LLM-фаза: без транзакции.
         state = StoryState.load(previous_context)
         prompt = self.__create_prompt(novel, scene, characters, lines, state)
 
@@ -321,7 +334,9 @@ class StoryContextGenerator(BaseGenerator):
 
         story_context = state.dump()
 
-        await self._scene_service.update_story_context(scene.id, story_context)
+        # 3) Write-фаза: короткая транзакция только на запись.
+        async with step():
+            await self._scene_service.update_story_context(scene.id, story_context)
         return story_context
 
     def __create_prompt(

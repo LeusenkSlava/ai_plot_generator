@@ -22,6 +22,10 @@ from src.core.novels.services.generation.prompts.text import (
     RUSSIAN_OUTPUT_NOTE,
     parse_day,
 )
+from src.core.novels.services.generation.transactions import (
+    TransactionFactory,
+    noop_step,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -45,12 +49,20 @@ class RoadmapGenerator(BaseGenerator):
         self._reasoning_effort = reasoning_effort
         self._think = think
 
-    async def generate(self, novel_id: int) -> list[Roadmap]:
-        novel = await self._novel_service.get(novel_id)
-        if not novel:
-            raise GenerationError(f"Novel with id {novel_id} not found")
+    async def generate(
+        self,
+        novel_id: int,
+        *,
+        step: TransactionFactory = noop_step,
+    ) -> list[Roadmap]:
+        # 1) Read-фаза: короткая транзакция.
+        async with step():
+            novel = await self._novel_service.get(novel_id)
+            if not novel:
+                raise GenerationError(f"Novel with id {novel_id} not found")
+            characters = await self._character_service.list_by_novel(novel.id) or []
 
-        characters = await self._character_service.list_by_novel(novel.id) or []
+        # 2) LLM-фаза: Codex (HTTP) и генерация — без транзакции.
         background_tags = await self.__load_background_tags(novel)
 
         prompt = self.__create_prompt(novel, characters, background_tags)
@@ -73,7 +85,7 @@ class RoadmapGenerator(BaseGenerator):
                 day = prev_day
             prev_day = day
 
-            step = Roadmap(
+            roadmap_step = Roadmap(
                 id=None,
                 created_at=None,
                 updated_at=None,
@@ -101,8 +113,12 @@ class RoadmapGenerator(BaseGenerator):
                 ),
                 day=day,
             )
-            step = await self._roadmap_service.add(step)
-            roadmap.append(step)
+            roadmap.append(roadmap_step)
+
+        # 3) Write-фаза: короткая транзакция только на запись.
+        async with step():
+            for index, roadmap_step in enumerate(roadmap):
+                roadmap[index] = await self._roadmap_service.add(roadmap_step)
 
         return roadmap
 

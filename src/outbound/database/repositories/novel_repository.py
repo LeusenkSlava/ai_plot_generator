@@ -193,6 +193,7 @@ class SceneRepository:
             await self._session.flush()
 
     async def delete(self, scene_id: int) -> None:
+        """Удаляет сцену; реплики и действия каскадно убирает СУБД (ON DELETE CASCADE)."""
         db_scene = await self._session.get(SceneModel, scene_id)
         if db_scene:
             await self._session.delete(db_scene)
@@ -258,6 +259,7 @@ class NovelRepository:
         return result.scalar_one()
 
     async def delete(self, novel_id: int) -> None:
+        """Удаляет новеллу; всё дерево потомков каскадно убирает СУБД (ON DELETE CASCADE)."""
         db_novel = await self._session.get(NovelModel, novel_id)
         if db_novel:
             await self._session.delete(db_novel)

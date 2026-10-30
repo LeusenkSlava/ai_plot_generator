@@ -22,6 +22,10 @@ from src.core.novels.services.generation.prompts.text import (
     RUSSIAN_OUTPUT_NOTE,
     parse_day,
 )
+from src.core.novels.services.generation.transactions import (
+    TransactionFactory,
+    noop_step,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -51,37 +55,45 @@ class SceneGenerator(BaseGenerator):
         previous_scenes: list[Scene] | None = None,
         story_context: str | None = None,
         order: int | None = None,
+        *,
+        step: TransactionFactory = noop_step,
     ) -> Scene:
         """Следующая сцена шага роадмапа. previous_scenes — уже сыгранные сцены новеллы для связности,
         story_context — изложение истории после предыдущей сцены (рендер фактов и персонажей для промпта сцены
         и валидатора). order — сквозной номер сцены в новелле.
+
+        Чтение состояния и запись сцены — отдельные короткие транзакции; LLM-вызовы
+        и валидация идут между ними и не держат соединение Postgres.
         """
-        roadmap = await self._roadmap_service.get(roadmap_id)
-        if not roadmap:
-            raise GenerationError(f"Roadmap with id {roadmap_id} not found")
+        # 1) Read-фаза: короткая транзакция.
+        async with step():
+            roadmap = await self._roadmap_service.get(roadmap_id)
+            if not roadmap:
+                raise GenerationError(f"Roadmap with id {roadmap_id} not found")
 
-        novel = await self._novel_service.get(roadmap.novel_id)
-        if not novel:
-            raise GenerationError(f"Novel with id {roadmap.novel_id} not found")
+            novel = await self._novel_service.get(roadmap.novel_id)
+            if not novel:
+                raise GenerationError(f"Novel with id {roadmap.novel_id} not found")
 
-        characters = await self._character_service.list_by_novel(novel.id) or []
+            characters = await self._character_service.list_by_novel(novel.id) or []
 
-        # Позиция сцены внутри шага роадмапа (для финала шага и подсказки в промпте).
-        # Считаем только валидные сцены (needs_review=False): сцена, не прошедшая
-        # валидацию из Задачи 1, не продвигает шаг и не должна сбивать номер.
-        scenes_in_step = await self._scene_service.list_by_roadmap(roadmap.id) or []
-        step_position = sum(1 for s in scenes_in_step if not s.needs_review) + 1
-        # Сквозной номер сцены по всей новелле: по нему идёт идемпотентность и
-        # упорядочивание в NovelState, поэтому он не должен сбрасываться на каждом шаге.
-        if order is None:
-            order = len(await self._scene_service.list_by_novel(novel.id) or []) + 1
-        is_final_for_roadmap = step_position >= max(roadmap.scenes_count, 1)
-        roadmaps = await self._roadmap_service.list_by_novel(novel.id) or []
-        is_last_roadmap = roadmap.step_id >= max(
-            (r.step_id for r in roadmaps), default=0
-        )
-        is_final_for_novel = is_final_for_roadmap and is_last_roadmap
+            # Позиция сцены внутри шага роадмапа (для финала шага и подсказки в промпте).
+            # Считаем только валидные сцены (needs_review=False): сцена, не прошедшая
+            # валидацию из Задачи 1, не продвигает шаг и не должна сбивать номер.
+            scenes_in_step = await self._scene_service.list_by_roadmap(roadmap.id) or []
+            step_position = sum(1 for s in scenes_in_step if not s.needs_review) + 1
+            # Сквозной номер сцены по всей новелле: по нему идёт идемпотентность и
+            # упорядочивание в NovelState, поэтому он не должен сбрасываться на каждом шаге.
+            if order is None:
+                order = len(await self._scene_service.list_by_novel(novel.id) or []) + 1
+            is_final_for_roadmap = step_position >= max(roadmap.scenes_count, 1)
+            roadmaps = await self._roadmap_service.list_by_novel(novel.id) or []
+            is_last_roadmap = roadmap.step_id >= max(
+                (r.step_id for r in roadmaps), default=0
+            )
+            is_final_for_novel = is_final_for_roadmap and is_last_roadmap
 
+        # 2) LLM-фаза: сборка промпта и ретрай-цикл — без транзакции.
         prompt = self.__create_prompt(
             novel,
             roadmap,
@@ -103,6 +115,7 @@ class SceneGenerator(BaseGenerator):
         last_reason: str | None = None
         scene: Scene | None = None
         duplicate_of: Scene | None = None
+        matched = False
         while True:
             scene = None
             duplicate_of = None
@@ -139,7 +152,8 @@ class SceneGenerator(BaseGenerator):
                             f"сцена повторяет предыдущую «{previous_scene.title}»"
                         )
                     else:
-                        return await self._scene_service.add(scene)
+                        matched = True
+                        break
                 else:
                     last_reason = verdict.reason
 
@@ -156,14 +170,18 @@ class SceneGenerator(BaseGenerator):
                 f"{last_reason or 'неизвестная ошибка'}"
             )
 
-        # Не пропускаем молча: сохраняем сцену с пометкой о ручном вмешательстве и
-        # логируем причину. Такая сцена не закрывает шаг и не проигрывается.
-        scene.needs_review = True
-        scene.review_reason = last_reason or "Сцена не соответствует шагу роадмапа"
-        scene.is_final_for_roadmap = False
-        scene.is_final_for_novel = False
-        self.__log_manual_intervention(roadmap, scene, last_reason)
-        return await self._scene_service.add(scene)
+        if not matched:
+            # Не пропускаем молча: сохраняем сцену с пометкой о ручном вмешательстве и
+            # логируем причину. Такая сцена не закрывает шаг и не проигрывается.
+            scene.needs_review = True
+            scene.review_reason = last_reason or "Сцена не соответствует шагу роадмапа"
+            scene.is_final_for_roadmap = False
+            scene.is_final_for_novel = False
+            self.__log_manual_intervention(roadmap, scene, last_reason)
+
+        # 3) Write-фаза: короткая транзакция только на запись.
+        async with step():
+            return await self._scene_service.add(scene)
 
     @staticmethod
     def __resolve_cast(

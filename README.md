@@ -166,7 +166,7 @@ uv run pytest
 | `APP__LOGGING_LEVEL` | нет | уровень логирования (по умолчанию `INFO`) |
 | `APP__DEBUG_MODE` | нет | debug-режим (по умолчанию `false`) |
 | `APP__ROOT_PATH` | нет | root path приложения за прокси (по умолчанию `/`) |
-| `GENERATION__MAX_CONCURRENCY` | нет | максимум одновременно обрабатываемых команд генерации (по умолчанию `10`) |
+| `GENERATION__MAX_CONCURRENCY` | нет | максимум одновременно обрабатываемых команд генерации (по умолчанию `50`) |
 | `GENERATION__MAX_RETRIES` | нет | ретраи сообщения при транзиентных ошибках (по умолчанию `3`) |
 | `GENERATION__RETRY_BASE_DELAY_S`, `GENERATION__RETRY_MAX_DELAY_S` | нет | экспоненциальный backoff ретраев (по умолчанию `1.0` / `30.0`) |
 | `GENERATION__DLQ_TOPIC` | нет | топик для «мёртвых» сообщений (по умолчанию `ai_plot.generation.dlq`) |

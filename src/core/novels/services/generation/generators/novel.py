@@ -9,6 +9,10 @@ from src.core.novels.services.crud import NovelService
 from src.core.novels.services.generation.generators.base import BaseGenerator
 from src.core.novels.services.generation.prompts.context import render_all
 from src.core.novels.services.generation.prompts.text import RUSSIAN_OUTPUT_NOTE
+from src.core.novels.services.generation.transactions import (
+    TransactionFactory,
+    noop_step,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +30,14 @@ class NovelGenerator(BaseGenerator):
         self._codex_service = codex_service
         self._reasoning_effort = reasoning_effort
 
-    async def generate(self, user_prompt: str, universe_id: int | None = None) -> Novel:
+    async def generate(
+        self,
+        user_prompt: str,
+        universe_id: int | None = None,
+        *,
+        step: TransactionFactory = noop_step,
+    ) -> Novel:
+        # Codex (HTTP) и LLM — вне транзакции: соединение Postgres здесь не держим.
         codex_context = None
         if universe_id:
             universe, characters, backgrounds = await self.__load_universe(universe_id)
@@ -36,7 +47,9 @@ class NovelGenerator(BaseGenerator):
         data = await self._generate(prompt, reasoning_effort=self._reasoning_effort)
 
         novel = Novel.from_llm(data, universe_id=universe_id)
-        novel = await self._novel_service.add(novel)
+        # Запись — единственная DB-операция генератора: короткая транзакция.
+        async with step():
+            novel = await self._novel_service.add(novel)
         return novel
 
     async def __load_universe(

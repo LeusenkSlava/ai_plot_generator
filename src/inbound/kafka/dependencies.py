@@ -36,6 +36,7 @@ from src.outbound.ai.client import build_deepseek_client
 from src.outbound.ai.deepseek_client import DeepSeekGenerator
 from src.outbound.cache.client import build_redis_client
 from src.outbound.cache.redis_cache import RedisCache
+from src.outbound.cache.redis_lock import RedisJobLock, RedisSceneLock
 from src.outbound.codex.client import build_codex_client
 from src.outbound.codex.codex_client import HttpCodexClient
 from src.outbound.database.repositories.generation_job_repository import (
@@ -47,9 +48,6 @@ from src.outbound.database.repositories.novel_repository import (
     NovelRepository,
     RoadmapRepository,
     SceneRepository,
-)
-from src.outbound.database.repositories.scene_generation_lock import (
-    SceneGenerationLock,
 )
 
 
@@ -201,14 +199,21 @@ def build_novel_generators(
     )
 
 
-def build_novel_composition_service(
+def _build_repos_services_generators(
     session: AsyncSession,
-) -> NovelCompositionService:
+) -> tuple[NovelRepositories, NovelDomainServices, NovelGenerators]:
     repos = build_novel_repositories(session)
     services = build_novel_domain_services(repos)
     generators = build_novel_generators(services)
+    return repos, services, generators
 
-    return NovelCompositionService(
+
+def build_generate_novel_use_case(
+    session: AsyncSession,
+) -> GenerateNovelUseCase:
+    repos, _services, generators = _build_repos_services_generators(session)
+
+    composition = NovelCompositionService(
         novel_generator=generators.novel,
         character_generator=generators.character,
         roadmap_generator=generators.roadmap,
@@ -217,15 +222,25 @@ def build_novel_composition_service(
         story_context_generator=generators.story_context,
     )
 
+    return GenerateNovelUseCase(
+        jobs_repo=GenerationJobRepository(session),
+        novel_repository=repos.novel,
+        composition_service=composition,
+        lock=RedisJobLock(
+            build_redis_client(),
+            ttl_s=settings.generation.JOB_LOCK_TTL_S,
+        ),
+        in_progress_poll_interval_s=settings.generation.IN_PROGRESS_POLL_INTERVAL_S,
+        in_progress_timeout_s=settings.generation.IN_PROGRESS_TIMEOUT_S,
+    )
 
-def build_scene_continuation_service(
+
+def build_generate_scene_use_case(
     session: AsyncSession,
-) -> SceneContinuationService:
-    repos = build_novel_repositories(session)
-    services = build_novel_domain_services(repos)
-    generators = build_novel_generators(services)
+) -> GenerateSceneUseCase:
+    repos, _services, generators = _build_repos_services_generators(session)
 
-    return SceneContinuationService(
+    continuation = SceneContinuationService(
         novel_repository=repos.novel,
         roadmap_repository=repos.roadmap,
         scene_repository=repos.scene,
@@ -233,23 +248,15 @@ def build_scene_continuation_service(
         scene_generator=generators.scene,
         dialogue_generator=generators.dialogue,
         story_context_generator=generators.story_context,
-        lock=SceneGenerationLock(session),
     )
 
-
-def build_generate_novel_use_case(
-    session: AsyncSession,
-) -> GenerateNovelUseCase:
-    return GenerateNovelUseCase(
-        jobs_repo=GenerationJobRepository(session),
-        composition_service=build_novel_composition_service(session),
-    )
-
-
-def build_generate_scene_use_case(
-    session: AsyncSession,
-) -> GenerateSceneUseCase:
     return GenerateSceneUseCase(
         jobs_repo=GenerationJobRepository(session),
-        continuation_service=build_scene_continuation_service(session),
+        continuation_service=continuation,
+        lock=RedisSceneLock(
+            build_redis_client(),
+            ttl_s=settings.generation.SCENE_LOCK_TTL_S,
+            acquire_timeout_s=settings.generation.SCENE_LOCK_ACQUIRE_TIMEOUT_S,
+            poll_interval_s=settings.generation.IN_PROGRESS_POLL_INTERVAL_S,
+        ),
     )

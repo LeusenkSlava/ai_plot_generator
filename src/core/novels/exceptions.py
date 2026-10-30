@@ -8,6 +8,22 @@ class GenerationError(Exception):
     """AI не смог сгенерировать описание."""
 
 
+class NovelGenerationFailedError(GenerationError):
+    """Сбой генерации новеллы на одном из шагов саги.
+
+    Несёт ``novel_id`` частично созданной новеллы (если она уже закоммичена),
+    чтобы вызывающий выполнил компенсацию — удалил её каскадом.
+    """
+
+    def __init__(self, novel_id: int | None, message: str):
+        self.novel_id = novel_id
+        super().__init__(message)
+
+
+class GenerationInProgressError(Exception):
+    """Другой воркер ещё обрабатывает этот job — повторить позже (ретрай-сигнал)."""
+
+
 class DialogueLineNotFoundError(Exception):
     def __init__(self, dialogue_line_id: int):
         self.dialogue_line_id = dialogue_line_id

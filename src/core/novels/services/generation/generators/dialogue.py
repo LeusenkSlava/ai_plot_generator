@@ -35,6 +35,10 @@ from src.core.novels.services.generation.prompts.cast import (
     render_cast,
 )
 from src.core.novels.services.generation.prompts.text import RUSSIAN_OUTPUT_NOTE
+from src.core.novels.services.generation.transactions import (
+    TransactionFactory,
+    noop_step,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -80,30 +84,40 @@ class DialogueGenerator(BaseGenerator):
         previous_lines: list[DialogueLine] | None = None,
         story_context: str | None = None,
         all_lines: list[DialogueLine] | None = None,
+        *,
+        step: TransactionFactory = noop_step,
     ) -> list[DialogueLine]:
-        """Генерация диалога"""
-        scene = await self._scene_service.get(scene_id)
-        if not scene:
-            raise GenerationError(f"Scene with id {scene_id} not found")
+        """Генерация диалога.
 
-        roadmap = await self._roadmap_service.get(scene.roadmap_id)
-        if not roadmap:
-            raise GenerationError(f"Roadmap with id {scene.roadmap_id} not found")
+        Чтение состояния и запись реплик — отдельные короткие транзакции; LLM и
+        Codex-подбор ассетов идут между ними и не держат соединение Postgres.
+        """
+        # 1) Read-фаза: короткая транзакция.
+        async with step():
+            scene = await self._scene_service.get(scene_id)
+            if not scene:
+                raise GenerationError(f"Scene with id {scene_id} not found")
 
-        characters, all_characters = await self._scene_cast(scene, roadmap.novel_id)
-        if not characters:
-            raise GenerationError(f"No characters found for novel {roadmap.novel_id}")
+            roadmap = await self._roadmap_service.get(scene.roadmap_id)
+            if not roadmap:
+                raise GenerationError(f"Roadmap with id {scene.roadmap_id} not found")
 
+            characters, all_characters = await self._scene_cast(scene, roadmap.novel_id)
+            if not characters:
+                raise GenerationError(f"No characters found for novel {roadmap.novel_id}")
+
+            novel = await self._novel_service.get(roadmap.novel_id)
+
+            last_outfits = await self._dialogue_line_service.last_outfit_per_character(
+                roadmap.novel_id
+            )
+
+        # 2) LLM-фаза: Codex (HTTP) + генерация/ремонт — без транзакции.
         characters_by_name = {character.name: character for character in characters}
         protagonist = find_protagonist(characters)
 
-        novel = await self._novel_service.get(roadmap.novel_id)
-
         assets = await self._scene_assets.load_assets(
             novel.universe_id if novel else None, all_characters
-        )
-        last_outfits = await self._dialogue_line_service.last_outfit_per_character(
-            roadmap.novel_id
         )
         current_outfits = self._scene_assets.current_outfits(
             characters, assets, last_outfits
@@ -184,35 +198,36 @@ class DialogueGenerator(BaseGenerator):
             prepared, resolved, assets, novel.universe_id if novel else None
         )
 
-        # Фаза 3: сохраняем реплики с итоговыми asset_key. order и is_final_for_scene
-        # считаются по финальному списку (после дедупа/отбрасывания строк).
+        # 3) Write-фаза: короткая транзакция только на запись. order и
+        # is_final_for_scene считаются по финальному списку (после дедупа/отбрасывания).
         dialogue_lines = []
         last_index = len(lines_data) - 1
-        for index, (character, item, _) in enumerate(prepared):
-            assets_picked: ResolvedAssets = resolved[index]
-            dialogue_line = DialogueLine(
-                id=None,
-                created_at=None,
-                updated_at=None,
-                novel_id=roadmap.novel_id,
-                scene_id=scene.id,
-                character_id=character.id,
-                order=index + 1,
-                text=item["text"],
-                is_final_for_scene=index == last_index,
-                is_thought=(
-                    bool(item.get("is_thought", False))
-                    if character.is_protagonist
-                    else False
-                ),
-                background_asset_key=assets_picked.background_asset_key,
-                sound_asset_key=assets_picked.sound_asset_key,
-                sprite_asset_key=assets_picked.sprite_asset_key,
-                outfit_asset_key=assets_picked.outfit_asset_key,
-                emotion_asset_key=assets_picked.emotion_asset_key,
-            )
-            dialogue_line = await self._dialogue_line_service.add(dialogue_line)
-            dialogue_lines.append(dialogue_line)
+        async with step():
+            for index, (character, item, _) in enumerate(prepared):
+                assets_picked: ResolvedAssets = resolved[index]
+                dialogue_line = DialogueLine(
+                    id=None,
+                    created_at=None,
+                    updated_at=None,
+                    novel_id=roadmap.novel_id,
+                    scene_id=scene.id,
+                    character_id=character.id,
+                    order=index + 1,
+                    text=item["text"],
+                    is_final_for_scene=index == last_index,
+                    is_thought=(
+                        bool(item.get("is_thought", False))
+                        if character.is_protagonist
+                        else False
+                    ),
+                    background_asset_key=assets_picked.background_asset_key,
+                    sound_asset_key=assets_picked.sound_asset_key,
+                    sprite_asset_key=assets_picked.sprite_asset_key,
+                    outfit_asset_key=assets_picked.outfit_asset_key,
+                    emotion_asset_key=assets_picked.emotion_asset_key,
+                )
+                dialogue_line = await self._dialogue_line_service.add(dialogue_line)
+                dialogue_lines.append(dialogue_line)
 
         return dialogue_lines
 

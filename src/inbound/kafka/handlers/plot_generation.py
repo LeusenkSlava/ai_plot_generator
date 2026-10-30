@@ -38,7 +38,7 @@ class NovelGenerateHandler:
                 job_id=schema.job_id,
                 prompt=schema.prompt,
                 universe_id=schema.universe_id,
-                savepoint=session.begin_nested,
+                step=session.begin,
             )
 
         # TODO Позже внести в use_case а то утечка бизнес логики

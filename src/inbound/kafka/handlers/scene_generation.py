@@ -38,7 +38,7 @@ class SceneGenerateHandler:
                 job_id=schema.job_id,
                 novel_id=schema.novel_id,
                 scene_order=schema.scene_order,
-                savepoint=session.begin_nested,
+                step=session.begin,
             )
 
         # TODO Позже внести в use_case а то утечка бизнес логики

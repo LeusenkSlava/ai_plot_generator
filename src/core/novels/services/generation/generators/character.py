@@ -9,6 +9,10 @@ from src.core.novels.services.crud import CharacterService, NovelService
 from src.core.novels.services.generation.generators.base import BaseGenerator
 from src.core.novels.services.generation.prompts.context import render_character_catalog
 from src.core.novels.services.generation.prompts.text import RUSSIAN_OUTPUT_NOTE
+from src.core.novels.services.generation.transactions import (
+    TransactionFactory,
+    noop_step,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -30,12 +34,19 @@ class CharacterGenerator(BaseGenerator):
         self._reasoning_effort = reasoning_effort
         self._think = think
 
-    async def generate(self, novel_id: int) -> list[Character]:
-        novel = await self._novel_service.get(novel_id)
+    async def generate(
+        self,
+        novel_id: int,
+        *,
+        step: TransactionFactory = noop_step,
+    ) -> list[Character]:
+        # 1) Read-фаза: короткая транзакция, соединение возвращается в пул до LLM.
+        async with step():
+            novel = await self._novel_service.get(novel_id)
         if not novel:
             raise GenerationError(f"Novel with id {novel_id} not found")
 
-        # Без вселенной в Codex не ходим
+        # 2) LLM-фаза: Codex (HTTP) и генерация — без транзакции.
         codex_characters: list[CodexCharacter] = []
         if novel.universe_id is not None:
             try:
@@ -79,10 +90,12 @@ class CharacterGenerator(BaseGenerator):
 
         self.__ensure_single_protagonist(characters)
 
+        # 3) Write-фаза: короткая транзакция только на запись.
         saved = []
-        for character in characters:
-            character = await self._character_service.add(character)
-            saved.append(character)
+        async with step():
+            for character in characters:
+                character = await self._character_service.add(character)
+                saved.append(character)
 
         return saved
 

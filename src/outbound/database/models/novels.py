@@ -9,7 +9,7 @@ class CharacterModel(BaseModel):
     __tablename__ = "characters"
 
     novel_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("novels.id"), nullable=False
+        Integer, ForeignKey("novels.id", ondelete="CASCADE"), nullable=False
     )
     name: Mapped[str] = mapped_column(String, nullable=False)
     role: Mapped[str] = mapped_column(String, nullable=False)
@@ -26,7 +26,10 @@ class CharacterModel(BaseModel):
     )
 
     dialogue_lines: Mapped[list["DialogueLineModel"]] = relationship(
-        "DialogueLineModel", back_populates="character", cascade="all, delete-orphan"
+        "DialogueLineModel",
+        back_populates="character",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
 
     def __repr__(self):
@@ -37,7 +40,7 @@ class RoadmapModel(BaseModel):
     __tablename__ = "roadmap"
 
     novel_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("novels.id"), nullable=False
+        Integer, ForeignKey("novels.id", ondelete="CASCADE"), nullable=False
     )
     step_id: Mapped[int] = mapped_column(Integer, nullable=False)
     title: Mapped[str] = mapped_column(String, nullable=False)
@@ -57,6 +60,7 @@ class RoadmapModel(BaseModel):
         "SceneModel",
         back_populates="roadmap",
         cascade="all, delete-orphan",
+        passive_deletes=True,
         order_by="SceneModel.order",
     )
 
@@ -75,16 +79,17 @@ class NovelModel(BaseModel):
     universe_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     characters: Mapped[list["CharacterModel"]] = relationship(
-        "CharacterModel", back_populates="novel", cascade="all, delete-orphan"
+        "CharacterModel", back_populates="novel", cascade="all, delete-orphan", passive_deletes=True
     )
     roadmap: Mapped[list["RoadmapModel"]] = relationship(
         "RoadmapModel",
         back_populates="novel",
         cascade="all, delete-orphan",
+        passive_deletes=True,
         order_by="RoadmapModel.step_id",
     )
     dialogue_lines: Mapped[list["DialogueLineModel"]] = relationship(
-        "DialogueLineModel", back_populates="novel", cascade="all, delete-orphan"
+        "DialogueLineModel", back_populates="novel", cascade="all, delete-orphan", passive_deletes=True
     )
 
 
@@ -92,7 +97,7 @@ class SceneModel(BaseModel):
     __tablename__ = "scenes"
 
     roadmap_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("roadmap.id"), nullable=False, index=True
+        Integer, ForeignKey("roadmap.id", ondelete="CASCADE"), nullable=False, index=True
     )
 
     title: Mapped[str] = mapped_column(String, nullable=False)
@@ -123,6 +128,7 @@ class SceneModel(BaseModel):
         "DialogueLineModel",
         back_populates="scene",
         cascade="all, delete-orphan",
+        passive_deletes=True,
         order_by="DialogueLineModel.order",
     )
 
@@ -134,13 +140,13 @@ class DialogueLineModel(BaseModel):
     __tablename__ = "dialogue_lines"
 
     novel_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("novels.id"), nullable=False, index=True
+        Integer, ForeignKey("novels.id", ondelete="CASCADE"), nullable=False, index=True
     )
     scene_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("scenes.id"), nullable=False, index=True
+        Integer, ForeignKey("scenes.id", ondelete="CASCADE"), nullable=False, index=True
     )
     character_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("characters.id"), nullable=False, index=True
+        Integer, ForeignKey("characters.id", ondelete="CASCADE"), nullable=False, index=True
     )
 
     order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -169,6 +175,7 @@ class DialogueLineModel(BaseModel):
         "DialogueActionModel",
         back_populates="dialogue_line",
         cascade="all, delete-orphan",
+        passive_deletes=True,
         order_by="DialogueActionModel.order",
     )
 
@@ -180,13 +187,13 @@ class DialogueActionModel(BaseModel):
     __tablename__ = "dialogue_actions"
 
     dialogue_line_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("dialogue_lines.id"), nullable=False, index=True
+        Integer, ForeignKey("dialogue_lines.id", ondelete="CASCADE"), nullable=False, index=True
     )
 
     order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     text: Mapped[str] = mapped_column(String, nullable=False)
     next_roadmap_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("roadmap.id"), nullable=True
+        Integer, ForeignKey("roadmap.id", ondelete="SET NULL"), nullable=True
     )
 
     dialogue_line: Mapped["DialogueLineModel"] = relationship(
