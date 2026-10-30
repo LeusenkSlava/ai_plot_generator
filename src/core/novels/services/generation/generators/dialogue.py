@@ -5,6 +5,7 @@ from src.core.novels.interfaces.generation import GeneratorProtocol
 from src.core.novels.models import (
     Character,
     DialogueLine,
+    Roadmap,
     Scene,
 )
 from src.core.novels.services.crud import (
@@ -129,6 +130,7 @@ class DialogueGenerator(BaseGenerator):
 
         base_prompt = self.__create_prompt(
             scene,
+            roadmap,
             characters,
             all_characters,
             protagonist,
@@ -263,6 +265,23 @@ class DialogueGenerator(BaseGenerator):
         return "; ".join(parts) or "unknown error"
 
     @staticmethod
+    def __choice_hint(roadmap: Roadmap) -> str:
+        """Подсказка о выборе: шаг с target_choice должен подвести диалог к решению.
+
+        Сами варианты выбора не пишем — они уже зафиксированы на шаге роадмапа
+        (roadmap_choices) и раздаются через playback.
+        """
+        if not roadmap.target_choice:
+            return "The story is linear: do not offer the player any choices.\n"
+        stakes = roadmap.choice_stakes or "the protagonist's decision"
+        return (
+            "This scene ends with a player choice. The choice is about: "
+            f"{stakes}. Lead the dialogue to the moment of decision — the final line "
+            "should naturally set up the choice — but do NOT write the choice options "
+            "themselves; they are provided separately.\n"
+        )
+
+    @staticmethod
     def __retry_message(reason: str) -> dict:
         """Дополнительное user-сообщение с требованием вернуть валидный JSON."""
         return {
@@ -280,6 +299,7 @@ class DialogueGenerator(BaseGenerator):
     def __create_prompt(
         self,
         scene: Scene,
+        roadmap: Roadmap,
         characters: list[Character],
         all_characters: list[Character],
         protagonist: Character | None,
@@ -309,8 +329,8 @@ class DialogueGenerator(BaseGenerator):
                 "Do not summarize the climax (a performance, a confession, a decisive act) as an outcome: "
                 "show it beat by beat — at least one crisis moment within the event and its resolution, "
                 "before it concludes. "
-                "The story is linear: do not offer the player any choices.\n"
-                "For each line, specify:\n"
+                + self.__choice_hint(roadmap)
+                + "For each line, specify:\n"
                 "1. character_name - the name of the speaking character, exactly as in the list.\n"
                 "2. text - the text of the line.\n"
                 "3. is_thought - boolean. True if the protagonist's line is their inner thoughts "

@@ -4,7 +4,7 @@ from src.core.codex.models import Background, CodexCharacter, Universe
 from src.core.codex.services import CodexService
 from src.core.novels.exceptions import GenerationError
 from src.core.novels.interfaces.generation import GeneratorProtocol
-from src.core.novels.models import Novel
+from src.core.novels.models import Novel, NovelMode
 from src.core.novels.services.crud import NovelService
 from src.core.novels.services.generation.generators.base import BaseGenerator
 from src.core.novels.services.generation.prompts.context import render_all
@@ -34,6 +34,7 @@ class NovelGenerator(BaseGenerator):
         self,
         user_prompt: str,
         universe_id: int | None = None,
+        mode: NovelMode = NovelMode.LINEAR,
         *,
         step: TransactionFactory = noop_step,
     ) -> Novel:
@@ -46,7 +47,7 @@ class NovelGenerator(BaseGenerator):
         prompt = self.__create_prompt(user_prompt, codex_context)
         data = await self._generate(prompt, reasoning_effort=self._reasoning_effort)
 
-        novel = Novel.from_llm(data, universe_id=universe_id)
+        novel = Novel.from_llm(data, universe_id=universe_id, mode=mode)
         # Запись — единственная DB-операция генератора: короткая транзакция.
         async with step():
             novel = await self._novel_service.add(novel)

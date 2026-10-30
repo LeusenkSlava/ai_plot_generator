@@ -7,19 +7,23 @@ from src.core.novels.services.crud import (
     CharacterService,
     DialogueLineService,
     NovelService,
+    PlayerChoiceService,
+    RoadmapChoiceService,
     RoadmapService,
     SceneService,
 )
 from src.core.novels.services.playback import NovelPlaybackService
+from src.core.novels.use_cases import ChooseOptionUseCase
 from src.main.config.settings import settings
 from src.outbound.cache.client import build_redis_client
 from src.outbound.cache.redis_lock import RedisSceneLock
 from src.outbound.database.dependencies import get_db_session
 from src.outbound.database.repositories.novel_repository import (
     CharacterRepository,
-    DialogueActionRepository,
     DialogueLineRepository,
     NovelRepository,
+    PlayerChoiceRepository,
+    RoadmapChoiceRepository,
     RoadmapRepository,
     SceneRepository,
 )
@@ -55,10 +59,16 @@ def get_dialogue_line_repository(
     return DialogueLineRepository(session)
 
 
-def get_dialogue_action_repository(
+def get_roadmap_choice_repository(
     session: Annotated[AsyncSession, Depends(get_db_session)],
-) -> DialogueActionRepository:
-    return DialogueActionRepository(session)
+) -> RoadmapChoiceRepository:
+    return RoadmapChoiceRepository(session)
+
+
+def get_player_choice_repository(
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+) -> PlayerChoiceRepository:
+    return PlayerChoiceRepository(session)
 
 
 def get_scene_generation_lock() -> RedisSceneLock:
@@ -112,6 +122,12 @@ def get_novel_playback_service(
     character_repository: Annotated[
         CharacterRepository, Depends(get_character_repository)
     ],
+    roadmap_choice_repository: Annotated[
+        RoadmapChoiceRepository, Depends(get_roadmap_choice_repository)
+    ],
+    player_choice_repository: Annotated[
+        PlayerChoiceRepository, Depends(get_player_choice_repository)
+    ],
     lock: Annotated[RedisSceneLock, Depends(get_scene_generation_lock)],
 ) -> NovelPlaybackService:
     return NovelPlaybackService(
@@ -120,5 +136,16 @@ def get_novel_playback_service(
         scene_repository=scene_repository,
         dialogue_line_repository=dialogue_line_repository,
         character_repository=character_repository,
+        roadmap_choice_repository=roadmap_choice_repository,
+        player_choice_repository=player_choice_repository,
         lock=lock,
+    )
+
+
+def build_choose_option_use_case(session: AsyncSession) -> ChooseOptionUseCase:
+    return ChooseOptionUseCase(
+        novel_repository=NovelRepository(session),
+        roadmap_service=RoadmapService(RoadmapRepository(session)),
+        choice_service=RoadmapChoiceService(RoadmapChoiceRepository(session)),
+        player_choice_service=PlayerChoiceService(PlayerChoiceRepository(session)),
     )

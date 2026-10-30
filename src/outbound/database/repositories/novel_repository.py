@@ -3,17 +3,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.novels.models import (
     Character,
-    DialogueAction,
     DialogueLine,
     Novel,
+    PlayerChoice,
     Roadmap,
+    RoadmapChoice,
     Scene,
 )
 from src.outbound.database.models.novels import (
     CharacterModel,
-    DialogueActionModel,
     DialogueLineModel,
     NovelModel,
+    PlayerChoiceModel,
+    RoadmapChoiceModel,
     RoadmapModel,
     SceneModel,
 )
@@ -80,7 +82,7 @@ class RoadmapRepository:
     async def add(self, roadmap: Roadmap) -> Roadmap:
         db_roadmap = RoadmapModel(
             novel_id=roadmap.novel_id,
-            step_id=roadmap.step_id,
+            depth=roadmap.depth,
             title=roadmap.title,
             event=roadmap.event,
             conflict=roadmap.conflict,
@@ -91,6 +93,8 @@ class RoadmapRepository:
             location_slug=roadmap.location_slug,
             time_of_day=roadmap.time_of_day,
             day=roadmap.day,
+            parent_roadmap_id=roadmap.parent_roadmap_id,
+            branch_id=roadmap.branch_id,
         )
         self._session.add(db_roadmap)
         await self._session.flush()
@@ -107,7 +111,7 @@ class RoadmapRepository:
         result = await self._session.execute(
             select(RoadmapModel)
             .where(RoadmapModel.novel_id == novel_id)
-            .order_by(RoadmapModel.step_id)
+            .order_by(RoadmapModel.branch_id, RoadmapModel.depth)
         )
         return [self._to_domain(r) for r in result.scalars().all()]
 
@@ -123,7 +127,7 @@ class RoadmapRepository:
             created_at=db_roadmap.created_at,
             updated_at=db_roadmap.updated_at,
             novel_id=db_roadmap.novel_id,
-            step_id=db_roadmap.step_id,
+            depth=db_roadmap.depth,
             title=db_roadmap.title,
             event=db_roadmap.event,
             conflict=db_roadmap.conflict,
@@ -134,6 +138,8 @@ class RoadmapRepository:
             location_slug=db_roadmap.location_slug,
             time_of_day=db_roadmap.time_of_day,
             day=db_roadmap.day,
+            parent_roadmap_id=db_roadmap.parent_roadmap_id,
+            branch_id=db_roadmap.branch_id,
         )
 
 
@@ -182,7 +188,9 @@ class SceneRepository:
             select(SceneModel)
             .join(RoadmapModel, RoadmapModel.id == SceneModel.roadmap_id)
             .where(RoadmapModel.novel_id == novel_id)
-            .order_by(RoadmapModel.step_id, SceneModel.order, SceneModel.id)
+            .order_by(
+                RoadmapModel.branch_id, RoadmapModel.depth, SceneModel.order, SceneModel.id
+            )
         )
         return [self._to_domain(s) for s in result.scalars().all()]
 
@@ -231,6 +239,7 @@ class NovelRepository:
             description=novel.description,
             tone=novel.tone,
             universe_id=novel.universe_id,
+            mode=novel.mode,
         )
         self._session.add(db_novel)
         await self._session.flush()
@@ -273,6 +282,7 @@ class NovelRepository:
             description=db_novel.description,
             tone=db_novel.tone,
             universe_id=db_novel.universe_id,
+            mode=db_novel.mode,
             created_at=db_novel.created_at,
             updated_at=db_novel.updated_at,
         )
@@ -316,7 +326,8 @@ class DialogueLineRepository:
             .join(RoadmapModel, RoadmapModel.id == SceneModel.roadmap_id)
             .where(DialogueLineModel.novel_id == novel_id)
             .order_by(
-                RoadmapModel.step_id,
+                RoadmapModel.branch_id,
+                RoadmapModel.depth,
                 SceneModel.order,
                 DialogueLineModel.order,
                 DialogueLineModel.id,
@@ -374,45 +385,129 @@ class DialogueLineRepository:
         )
 
 
-class DialogueActionRepository:
+class RoadmapChoiceRepository:
     def __init__(self, session: AsyncSession):
         self._session = session
 
-    async def add(self, dialog_action: DialogueAction) -> DialogueAction:
-        db_dialog_action = DialogueActionModel(
-            dialogue_line_id=dialog_action.dialogue_line_id,
-            order=dialog_action.order,
-            text=dialog_action.text,
-            next_roadmap_id=dialog_action.next_roadmap_id,
+    async def add(self, choice: RoadmapChoice) -> RoadmapChoice:
+        db_choice = RoadmapChoiceModel(
+            roadmap_id=choice.roadmap_id,
+            order=choice.order,
+            text=choice.text,
+            is_true=choice.is_true,
+            branch_direction=choice.branch_direction,
+            next_roadmap_id=choice.next_roadmap_id,
         )
-        self._session.add(db_dialog_action)
+        self._session.add(db_choice)
         await self._session.flush()
-        return self._to_domain(db_dialog_action)
+        return self._to_domain(db_choice)
 
-    async def get_by_id(self, dialog_action_id: int) -> DialogueAction | None:
+    async def get_by_id(self, choice_id: int) -> RoadmapChoice | None:
         result = await self._session.execute(
-            select(DialogueActionModel).where(
-                DialogueActionModel.id == dialog_action_id
-            )
+            select(RoadmapChoiceModel).where(RoadmapChoiceModel.id == choice_id)
         )
-        db_dialog_action = result.scalar_one_or_none()
-        return self._to_domain(db_dialog_action) if db_dialog_action else None
+        db_choice = result.scalar_one_or_none()
+        return self._to_domain(db_choice) if db_choice else None
 
-    async def delete(self, dialog_action_id: int) -> None:
-        db_dialog_action = await self._session.get(
-            DialogueActionModel, dialog_action_id
+    async def list_by_roadmap_id(self, roadmap_id: int) -> list[RoadmapChoice]:
+        result = await self._session.execute(
+            select(RoadmapChoiceModel)
+            .where(RoadmapChoiceModel.roadmap_id == roadmap_id)
+            .order_by(RoadmapChoiceModel.order)
         )
-        if db_dialog_action:
-            await self._session.delete(db_dialog_action)
+        return [self._to_domain(c) for c in result.scalars().all()]
+
+    async def list_by_novel_id(self, novel_id: int) -> list[RoadmapChoice]:
+        result = await self._session.execute(
+            select(RoadmapChoiceModel)
+            .join(RoadmapModel, RoadmapModel.id == RoadmapChoiceModel.roadmap_id)
+            .where(RoadmapModel.novel_id == novel_id)
+            .order_by(RoadmapModel.depth, RoadmapChoiceModel.order)
+        )
+        return [self._to_domain(c) for c in result.scalars().all()]
+
+    async def update_next_roadmap(self, choice_id: int, next_roadmap_id: int) -> None:
+        db_choice = await self._session.get(RoadmapChoiceModel, choice_id)
+        if db_choice:
+            db_choice.next_roadmap_id = next_roadmap_id
+            await self._session.flush()
+
+    async def delete(self, choice_id: int) -> None:
+        db_choice = await self._session.get(RoadmapChoiceModel, choice_id)
+        if db_choice:
+            await self._session.delete(db_choice)
 
     @staticmethod
-    def _to_domain(db_dialog_action: DialogueActionModel) -> DialogueAction:
-        return DialogueAction(
-            id=db_dialog_action.id,
-            created_at=db_dialog_action.created_at,
-            updated_at=db_dialog_action.updated_at,
-            dialogue_line_id=db_dialog_action.dialogue_line_id,
-            order=db_dialog_action.order,
-            text=db_dialog_action.text,
-            next_roadmap_id=db_dialog_action.next_roadmap_id,
+    def _to_domain(db_choice: RoadmapChoiceModel) -> RoadmapChoice:
+        return RoadmapChoice(
+            id=db_choice.id,
+            created_at=db_choice.created_at,
+            updated_at=db_choice.updated_at,
+            roadmap_id=db_choice.roadmap_id,
+            order=db_choice.order,
+            text=db_choice.text,
+            is_true=db_choice.is_true,
+            branch_direction=db_choice.branch_direction,
+            next_roadmap_id=db_choice.next_roadmap_id,
+        )
+
+
+class PlayerChoiceRepository:
+    def __init__(self, session: AsyncSession):
+        self._session = session
+
+    async def add(self, player_choice: PlayerChoice) -> PlayerChoice:
+        db_player_choice = PlayerChoiceModel(
+            novel_id=player_choice.novel_id,
+            roadmap_choice_id=player_choice.roadmap_choice_id,
+            dialogue_line_id=player_choice.dialogue_line_id,
+        )
+        self._session.add(db_player_choice)
+        await self._session.flush()
+        return self._to_domain(db_player_choice)
+
+    async def get_by_id(self, player_choice_id: int) -> PlayerChoice | None:
+        result = await self._session.execute(
+            select(PlayerChoiceModel).where(
+                PlayerChoiceModel.id == player_choice_id
+            )
+        )
+        db_player_choice = result.scalar_one_or_none()
+        return self._to_domain(db_player_choice) if db_player_choice else None
+
+    async def list_by_novel_id(self, novel_id: int) -> list[PlayerChoice]:
+        result = await self._session.execute(
+            select(PlayerChoiceModel)
+            .where(PlayerChoiceModel.novel_id == novel_id)
+            .order_by(PlayerChoiceModel.id)
+        )
+        return [self._to_domain(c) for c in result.scalars().all()]
+
+    async def get_by_roadmap_choice_id(
+        self, roadmap_choice_id: int
+    ) -> PlayerChoice | None:
+        result = await self._session.execute(
+            select(PlayerChoiceModel).where(
+                PlayerChoiceModel.roadmap_choice_id == roadmap_choice_id
+            )
+        )
+        db_player_choice = result.scalar_one_or_none()
+        return self._to_domain(db_player_choice) if db_player_choice else None
+
+    async def delete(self, player_choice_id: int) -> None:
+        db_player_choice = await self._session.get(
+            PlayerChoiceModel, player_choice_id
+        )
+        if db_player_choice:
+            await self._session.delete(db_player_choice)
+
+    @staticmethod
+    def _to_domain(db_player_choice: PlayerChoiceModel) -> PlayerChoice:
+        return PlayerChoice(
+            id=db_player_choice.id,
+            created_at=db_player_choice.created_at,
+            updated_at=db_player_choice.updated_at,
+            novel_id=db_player_choice.novel_id,
+            roadmap_choice_id=db_player_choice.roadmap_choice_id,
+            dialogue_line_id=db_player_choice.dialogue_line_id,
         )

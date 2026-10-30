@@ -1,8 +1,16 @@
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import StrEnum
 from typing import ClassVar
 
 from src.core._shared.models.llm_base import LLMGeneratedModel
+
+
+class NovelMode(StrEnum):
+    """Режим интерактивности новеллы."""
+
+    LINEAR = "linear"
+    INTERACTIVE = "interactive"
 
 
 @dataclass
@@ -29,7 +37,9 @@ class Roadmap:
     created_at: datetime | None
     updated_at: datetime | None
     novel_id: int
-    step_id: int
+    # Глубина по пути от корня (1..N). Не глобальный номер: у разных веток
+    # значения повторяются, адресом шага служит только суррогатный id.
+    depth: int
     title: str
     event: str
     conflict: str
@@ -42,6 +52,10 @@ class Roadmap:
     location_slug: str | None = None
     time_of_day: str | None = None
     day: int | None = None
+    # Ребро дерева: шаг, из которого пришли (None только у корня).
+    parent_roadmap_id: int | None = None
+    # Номер ветки; 0 = истинная ветка.
+    branch_id: int = 0
 
 
 @dataclass
@@ -85,6 +99,7 @@ class Novel(LLMGeneratedModel):
     description: str
     tone: str
     universe_id: int | None = None
+    mode: NovelMode = NovelMode.LINEAR
 
     _LLM_FIELDS: ClassVar[dict[str, str]] = {
         "title": "short, catchy title",
@@ -94,12 +109,19 @@ class Novel(LLMGeneratedModel):
     }
 
     @classmethod
-    def from_llm(cls, data: dict, *, universe_id: int | None = None) -> "Novel":
+    def from_llm(
+        cls,
+        data: dict,
+        *,
+        universe_id: int | None = None,
+        mode: NovelMode = NovelMode.LINEAR,
+    ) -> "Novel":
         return cls(
             id=None,
             created_at=None,
             updated_at=None,
             universe_id=universe_id,
+            mode=mode,
             **cls.llm_values(data),
         )
 
@@ -131,13 +153,35 @@ class DialogueLine:
 
 
 @dataclass
-class DialogueAction:
+class RoadmapChoice:
+    """Вариант выбора на шаге роадмапа (target_choice)."""
+
     id: int | None
     created_at: datetime | None
     updated_at: datetime | None
 
-    dialogue_line_id: int
+    roadmap_id: int
 
     order: int
     text: str
-    next_roadmap_id: int | None
+    # Продолжение истинной ветки; ведёт на уже существующий следующий шаг спайна.
+    is_true: bool = False
+    # Завязка альтернативной ветки (для ленивой генерации после выбора).
+    branch_direction: str | None = None
+    # Куда ведёт выбор: для is_true — следующий шаг спайна, для форка — NULL до
+    # момента выбора, после генерации ветки — её первый шаг.
+    next_roadmap_id: int | None = None
+
+
+@dataclass
+class PlayerChoice:
+    """Запись о выбранном игроком варианте (журнал пути)."""
+
+    id: int | None
+    created_at: datetime | None
+    updated_at: datetime | None
+
+    novel_id: int
+    roadmap_choice_id: int
+    # Реплика, на которой был показан выбор (для трассировки).
+    dialogue_line_id: int | None = None

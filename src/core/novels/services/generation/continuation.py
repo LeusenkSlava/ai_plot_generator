@@ -8,6 +8,8 @@ from src.core.novels.exceptions import (
 from src.core.novels.interfaces.repository import (
     DialogueLineRepositoryProtocol,
     NovelRepositoryProtocol,
+    PlayerChoiceRepositoryProtocol,
+    RoadmapChoiceRepositoryProtocol,
     RoadmapRepositoryProtocol,
     SceneRepositoryProtocol,
 )
@@ -26,12 +28,12 @@ logger = logging.getLogger(__name__)
 
 
 class SceneContinuationService:
-    """Догенерация новеллы: сцена с порядковым номером scene_order вместе с репликами.
+    """Догенерация новеллы: сцена шага роадмапа (roadmap_id, position) с репликами.
 
-    Блокировка ``(novel_id, scene_order)`` держится вызывающим (use-case) на Redis,
-    а генераторы сами делят работу на короткие read/write-транзакции и не держат
-    соединение Postgres во время LLM-вызовов. При сбое частично созданная сцена
-    удаляется каскадом (компенсация).
+    Блокировка ``(novel_id, roadmap_id, position)`` держится вызывающим (use-case)
+    на Redis, а генераторы сами делят работу на короткие read/write-транзакции и не
+    держат соединение Postgres во время LLM-вызовов. При сбое частично созданная
+    сцена удаляется каскадом (компенсация).
     """
 
     def __init__(
@@ -40,6 +42,8 @@ class SceneContinuationService:
         roadmap_repository: RoadmapRepositoryProtocol,
         scene_repository: SceneRepositoryProtocol,
         dialogue_line_repository: DialogueLineRepositoryProtocol,
+        roadmap_choice_repository: RoadmapChoiceRepositoryProtocol,
+        player_choice_repository: PlayerChoiceRepositoryProtocol,
         scene_generator: SceneGenerator,
         dialogue_generator: DialogueGenerator,
         story_context_generator: StoryContextGenerator,
@@ -48,18 +52,30 @@ class SceneContinuationService:
         self._roadmaps = roadmap_repository
         self._scenes = scene_repository
         self._dialogue_lines = dialogue_line_repository
+        self._roadmap_choices = roadmap_choice_repository
+        self._player_choices = player_choice_repository
         self._scene_generator = scene_generator
         self._dialogue_generator = dialogue_generator
         self._story_context_generator = story_context_generator
 
     async def generate(
-        self, novel_id: int, scene_order: int, *, step: TransactionFactory
+        self,
+        novel_id: int,
+        roadmap_id: int,
+        position: int,
+        *,
+        step: TransactionFactory,
     ) -> Scene:
-        with llm_trace(f"scene_{scene_order}", novel_id=novel_id):
-            return await self._generate(novel_id, scene_order, step=step)
+        with llm_trace(f"scene_{roadmap_id}_{position}", novel_id=novel_id):
+            return await self._generate(novel_id, roadmap_id, position, step=step)
 
     async def _generate(
-        self, novel_id: int, scene_order: int, *, step: TransactionFactory
+        self,
+        novel_id: int,
+        roadmap_id: int,
+        position: int,
+        *,
+        step: TransactionFactory,
     ) -> Scene:
         """Возвращает сцену. Read-фаза коммитится отдельно (``step``)."""
         async with step():
@@ -68,14 +84,20 @@ class SceneContinuationService:
 
             state = await self._load_state(novel_id)
 
-            if (existing := state.scene_at(scene_order)) is not None:
+            # Идемпотентность по (roadmap_id, position): повторная доставка сообщения
+            # возвращает уже сгенерированную сцену.
+            if (existing := state.scene_at_step_position(roadmap_id, position)) is not None:
                 return existing
 
             slot = state.resolve_next_slot()
             if slot is None:
                 raise NovelFinishedError(novel_id)
-            if scene_order != slot.order:
-                raise SceneOrderError(novel_id, scene_order, slot.order)
+            if slot.roadmap.id != roadmap_id or slot.position != position:
+                raise SceneOrderError(
+                    novel_id,
+                    f"roadmap={roadmap_id},position={position}",
+                    f"roadmap={slot.roadmap.id},position={slot.position}",
+                )
 
         return await self._run_pipeline(slot, state, step=step)
 
@@ -83,7 +105,15 @@ class SceneContinuationService:
         roadmaps = await self._roadmaps.list_by_novel_id(novel_id)
         scenes = await self._scenes.list_by_novel_id(novel_id)
         lines = await self._dialogue_lines.list_by_novel_id(novel_id)
-        return NovelState(roadmaps=roadmaps, scenes=scenes, dialogue_lines=lines)
+        choices = await self._roadmap_choices.list_by_novel_id(novel_id)
+        player_choices = await self._player_choices.list_by_novel_id(novel_id)
+        return NovelState(
+            roadmaps=roadmaps,
+            scenes=scenes,
+            dialogue_lines=lines,
+            choices=choices,
+            player_choices=player_choices,
+        )
 
     async def _run_pipeline(
         self, slot: NextSceneSlot, state: NovelState, *, step: TransactionFactory
@@ -96,6 +126,7 @@ class SceneContinuationService:
                 slot.roadmap.id,
                 previous_scenes=state.last_scenes,
                 story_context=story_text,
+                position=slot.position,
                 order=slot.order,
                 step=step,
             )
@@ -122,8 +153,7 @@ class SceneContinuationService:
             return scene
         except Exception:
             # Компенсация: сцена уже закоммичена, а диалог/контекст не доехали —
-            # удаляем её (СУБД каскадно убирает реплики и действия), чтобы ретрай
-            # начал с чистого листа.
+            # удаляем её (СУБД каскадно убирает реплики), чтобы ретрай начал с чистого листа.
             if scene is not None:
                 try:
                     async with step():

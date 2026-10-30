@@ -12,15 +12,18 @@ from src.core.novels.interfaces.repository import (
     CharacterRepositoryProtocol,
     DialogueLineRepositoryProtocol,
     NovelRepositoryProtocol,
+    PlayerChoiceRepositoryProtocol,
+    RoadmapChoiceRepositoryProtocol,
     RoadmapRepositoryProtocol,
     SceneRepositoryProtocol,
 )
-from src.core.novels.models import Character, DialogueLine, Scene
+from src.core.novels.models import Character, DialogueLine, RoadmapChoice, Scene
 from src.core.novels.services.generation.state import resolve_next_slot
 
 
 class PlaybackStatus(str, Enum):
     OK = "ok"
+    CHOICE = "choice"
     NEED_GENERATION = "need_generation"
     GENERATING = "generating"
     FINISHED = "finished"
@@ -37,14 +40,17 @@ class DialogueStep:
 class PlaybackResult:
     status: PlaybackStatus
     step: DialogueStep | None = None
-    next_scene_order: int | None = None
+    choices: list[RoadmapChoice] | None = None
+    next_roadmap_id: int | None = None
+    next_position: int | None = None
 
 
 class NovelPlaybackService:
     """Проигрывание новеллы: выдаёт реплики по порядку вместе с персонажем.
 
-    Только читает из БД. Если реплики кончились, а роадмап не пройден, сообщает номер сцены,
-    которую нужно сгенерировать (генерация идёт через Kafka).
+    Только читает из БД. Если реплики кончились, а роадмап не пройден, сообщает шаг
+    роадмапа и позицию сцены, которую нужно сгенерировать (генерация идёт через
+    Kafka). На реплике выбора возвращает статус ``choice`` со списком вариантов.
     """
 
     def __init__(
@@ -54,6 +60,8 @@ class NovelPlaybackService:
         scene_repository: SceneRepositoryProtocol,
         dialogue_line_repository: DialogueLineRepositoryProtocol,
         character_repository: CharacterRepositoryProtocol,
+        roadmap_choice_repository: RoadmapChoiceRepositoryProtocol,
+        player_choice_repository: PlayerChoiceRepositoryProtocol,
         lock: SceneGenerationLockProtocol,
     ):
         self._novels = novel_repository
@@ -61,6 +69,8 @@ class NovelPlaybackService:
         self._scenes = scene_repository
         self._dialogue_lines = dialogue_line_repository
         self._characters = character_repository
+        self._roadmap_choices = roadmap_choice_repository
+        self._player_choices = player_choice_repository
         self._lock = lock
 
     async def next(self, novel_id: int, dialogue_line_id: int | None) -> PlaybackResult:
@@ -78,10 +88,16 @@ class NovelPlaybackService:
         index = self._resolve_index(lines, dialogue_line_id)
 
         if index < len(lines):
-            return PlaybackResult(
-                status=PlaybackStatus.OK,
-                step=await self._step(lines[index]),
-            )
+            line = lines[index]
+            step = await self._step(line)
+            if await self._is_choice_line(line, step.scene):
+                choices = await self._roadmap_choices.list_by_roadmap_id(
+                    step.scene.roadmap_id
+                )
+                return PlaybackResult(
+                    status=PlaybackStatus.CHOICE, step=step, choices=choices
+                )
+            return PlaybackResult(status=PlaybackStatus.OK, step=step)
 
         return await self._resolve_tail_status(novel_id)
 
@@ -111,19 +127,32 @@ class NovelPlaybackService:
             raise DialogueLineNotFoundError(dialogue_line_id)
         return position + 1
 
+    async def _is_choice_line(self, line: DialogueLine, scene: Scene) -> bool:
+        """Реплика выбора = последняя реплика последней сцены шага с target_choice."""
+        if not line.is_final_for_scene or not scene.is_final_for_roadmap:
+            return False
+        roadmap = await self._roadmaps.get_by_id(scene.roadmap_id)
+        return roadmap is not None and roadmap.target_choice
+
     async def _resolve_tail_status(self, novel_id: int) -> PlaybackResult:
         roadmaps = await self._roadmaps.list_by_novel_id(novel_id)
         scenes = await self._scenes.list_by_novel_id(novel_id)
-        slot = resolve_next_slot(roadmaps, scenes)
+        choices = await self._roadmap_choices.list_by_novel_id(novel_id)
+        player_choices = await self._player_choices.list_by_novel_id(novel_id)
+        slot = resolve_next_slot(roadmaps, scenes, choices, player_choices)
         if slot is None:
             return PlaybackResult(status=PlaybackStatus.FINISHED)
 
         status = (
             PlaybackStatus.GENERATING
-            if await self._lock.is_locked(novel_id, slot.order)
+            if await self._lock.is_locked(novel_id, slot.roadmap.id, slot.position)
             else PlaybackStatus.NEED_GENERATION
         )
-        return PlaybackResult(status=status, next_scene_order=slot.order)
+        return PlaybackResult(
+            status=status,
+            next_roadmap_id=slot.roadmap.id,
+            next_position=slot.position,
+        )
 
     async def _step(self, line: DialogueLine) -> DialogueStep:
         scene = await self._scenes.get_by_id(line.scene_id)

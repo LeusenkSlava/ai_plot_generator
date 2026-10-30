@@ -3,10 +3,13 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
+from src.core.novels.models import NovelMode
+
 
 class NovelCreateRequest(BaseModel):
     prompt: str
     universe_id: int | None = None
+    mode: NovelMode = NovelMode.LINEAR
 
 class NovelResponse(BaseModel):
     id: int
@@ -18,6 +21,7 @@ class NovelResponse(BaseModel):
     description: str
     tone: str
     universe_id: int | None
+    mode: NovelMode
 
 
 class NovelListResponse(BaseModel):
@@ -66,6 +70,12 @@ class DialogueStepResponse(BaseModel):
     character: CharacterResponse
 
 
+class RoadmapChoiceResponse(BaseModel):
+    id: int
+    text: str
+    is_true: bool
+
+
 class PlaybackOkResponse(BaseModel):
     """Следующая реплика есть."""
 
@@ -73,15 +83,24 @@ class PlaybackOkResponse(BaseModel):
     step: DialogueStepResponse
 
 
+class PlaybackChoiceResponse(BaseModel):
+    """Текущая реплика — точка выбора; в ``choices`` лежат варианты."""
+
+    status: Literal["choice"]
+    step: DialogueStepResponse
+    choices: list[RoadmapChoiceResponse]
+
+
 class PlaybackPendingResponse(BaseModel):
     """Реплики кончились, роадмап не пройден.
 
-    need_generation — нужно отправить команду в ai_plot.scene.generate;
-    generating — сцена уже генерируется.
+    need_generation — нужно отправить команду в ai_plot.scene.generate с
+    roadmap_id и position; generating — сцена уже генерируется.
     """
 
     status: Literal["need_generation", "generating"]
-    next_scene_order: int
+    next_roadmap_id: int
+    next_position: int
 
 
 class PlaybackFinishedResponse(BaseModel):
@@ -91,6 +110,18 @@ class PlaybackFinishedResponse(BaseModel):
 
 
 PlaybackResponse = Annotated[
-    PlaybackOkResponse | PlaybackPendingResponse | PlaybackFinishedResponse,
+    PlaybackOkResponse
+    | PlaybackChoiceResponse
+    | PlaybackPendingResponse
+    | PlaybackFinishedResponse,
     Field(discriminator="status"),
 ]
+
+
+class ChooseRequest(BaseModel):
+    roadmap_choice_id: int
+    dialogue_line_id: int | None = None
+
+
+class ChooseResponse(BaseModel):
+    status: Literal["ok", "need_branch_generation"]

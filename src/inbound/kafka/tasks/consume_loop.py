@@ -4,7 +4,10 @@ import logging
 from aiokafka import AIOKafkaConsumer, TopicPartition
 
 from src.inbound.kafka.handlers import MessageHandler
-from src.inbound.kafka.schemas import SceneGenerateRequestedSchema
+from src.inbound.kafka.schemas import (
+    BranchGenerateRequestedSchema,
+    SceneGenerateRequestedSchema,
+)
 from src.inbound.kafka.tasks.keyed_locks import KeyedLocks
 from src.inbound.kafka.tasks.offset_tracker import OffsetTracker
 from src.outbound.kafka.producers.dlq_sender import DlqSender
@@ -22,6 +25,11 @@ def _routing_key(topic: str, raw: bytes) -> int | None:
     if topic == Topics.SCENE_GENERATE:
         try:
             return SceneGenerateRequestedSchema.model_validate_json(raw).novel_id
+        except Exception:
+            return None
+    if topic == Topics.BRANCH_GENERATE:
+        try:
+            return BranchGenerateRequestedSchema.model_validate_json(raw).novel_id
         except Exception:
             return None
     return None

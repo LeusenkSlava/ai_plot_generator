@@ -18,9 +18,9 @@ logger = logging.getLogger(__name__)
 class GenerateSceneUseCase:
     """Cгенерировать следующую сцену новеллы.
 
-    Взаимоисключение по ``(novel_id, scene_order)`` держится на Redis-блокировке,
-    а генераторы делят работу на короткие read/write-транзакции, поэтому соединение
-    Postgres не держится во время LLM-вызовов.
+    Взаимоисключение по ``(novel_id, roadmap_id, position)`` держится на
+    Redis-блокировке, а генераторы делят работу на короткие read/write-транзакции,
+    поэтому соединение Postgres не держится во время LLM-вызовов.
     """
 
     def __init__(
@@ -37,7 +37,8 @@ class GenerateSceneUseCase:
         self,
         job_id: int,
         novel_id: int,
-        scene_order: int,
+        roadmap_id: int,
+        position: int,
         *,
         step: TransactionFactory,
     ) -> GenerationJob:
@@ -47,7 +48,7 @@ class GenerateSceneUseCase:
                 return job
 
         # Блокирующий захват: ждёт, пока другой воркер закончит эту же сцену.
-        await self._lock.acquire(novel_id, scene_order)
+        await self._lock.acquire(novel_id, roadmap_id, position)
 
         try:
             # Повторная проверка под блокировкой: пока ждали, дубль с тем же
@@ -59,7 +60,7 @@ class GenerateSceneUseCase:
 
             try:
                 scene = await self._continuation_service.generate(
-                    novel_id, scene_order, step=step
+                    novel_id, roadmap_id, position, step=step
                 )
             except (
                 GenerationError,
@@ -68,10 +69,11 @@ class GenerateSceneUseCase:
                 SceneOrderError,
             ) as e:
                 logger.error(
-                    "Scene generation: job_id=%s novel_id=%s scene_order=%s failed: %s",
+                    "Scene generation: job_id=%s novel_id=%s roadmap_id=%s position=%s failed: %s",
                     job_id,
                     novel_id,
-                    scene_order,
+                    roadmap_id,
+                    position,
                     e,
                 )
                 async with step():
@@ -97,4 +99,4 @@ class GenerateSceneUseCase:
                     )
                 )
         finally:
-            await self._lock.release(novel_id, scene_order)
+            await self._lock.release(novel_id, roadmap_id, position)

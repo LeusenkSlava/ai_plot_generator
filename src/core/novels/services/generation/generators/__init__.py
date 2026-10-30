@@ -1,3 +1,6 @@
+from src.core.novels.services.generation.generators.branch_roadmap import (
+    BranchRoadmapGenerator,
+)
 from src.core.novels.services.generation.generators.character import CharacterGenerator
 from src.core.novels.services.generation.generators.dialogue import DialogueGenerator
 from src.core.novels.services.generation.generators.dialogue_repair import (
@@ -6,9 +9,12 @@ from src.core.novels.services.generation.generators.dialogue_repair import (
 from src.core.novels.services.generation.generators.novel import NovelGenerator
 from src.core.novels.services.generation.generators.roadmap import RoadmapGenerator
 from src.core.novels.services.generation.generators.scene import SceneGenerator
-from src.core.novels.services.generation.generators.story_context import StoryContextGenerator
+from src.core.novels.services.generation.generators.story_context import (
+    StoryContextGenerator,
+)
 
 __all__ = (
+    "BranchRoadmapGenerator",
     "CharacterGenerator",
     "DialogueGenerator",
     "DialogueRepairService",

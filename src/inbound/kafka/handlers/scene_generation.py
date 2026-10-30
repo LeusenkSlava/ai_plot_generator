@@ -37,7 +37,8 @@ class SceneGenerateHandler:
             job = await use_case.execute(
                 job_id=schema.job_id,
                 novel_id=schema.novel_id,
-                scene_order=schema.scene_order,
+                roadmap_id=schema.roadmap_id,
+                position=schema.position,
                 step=session.begin,
             )
 

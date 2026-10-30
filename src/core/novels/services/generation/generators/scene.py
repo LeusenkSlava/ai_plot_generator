@@ -54,13 +54,15 @@ class SceneGenerator(BaseGenerator):
         roadmap_id: int,
         previous_scenes: list[Scene] | None = None,
         story_context: str | None = None,
+        position: int | None = None,
         order: int | None = None,
         *,
         step: TransactionFactory = noop_step,
     ) -> Scene:
         """Следующая сцена шага роадмапа. previous_scenes — уже сыгранные сцены новеллы для связности,
         story_context — изложение истории после предыдущей сцены (рендер фактов и персонажей для промпта сцены
-        и валидатора). order — сквозной номер сцены в новелле.
+        и валидатора). position — номер сцены внутри шага (ключ идемпотентности), order — сквозной номер
+        сцены в новелле.
 
         Чтение состояния и запись сцены — отдельные короткие транзакции; LLM-вызовы
         и валидация идут между ними и не держат соединение Postgres.
@@ -81,24 +83,25 @@ class SceneGenerator(BaseGenerator):
             # Считаем только валидные сцены (needs_review=False): сцена, не прошедшая
             # валидацию из Задачи 1, не продвигает шаг и не должна сбивать номер.
             scenes_in_step = await self._scene_service.list_by_roadmap(roadmap.id) or []
-            step_position = sum(1 for s in scenes_in_step if not s.needs_review) + 1
-            # Сквозной номер сцены по всей новелле: по нему идёт идемпотентность и
-            # упорядочивание в NovelState, поэтому он не должен сбрасываться на каждом шаге.
+            if position is None:
+                position = sum(1 for s in scenes_in_step if not s.needs_review) + 1
+            # Сквозной номер сцены по всей новелле: упорядочивание сыгранного пути в
+            # NovelState. Это не ключ идемпотентности — им служит (roadmap_id, position).
             if order is None:
                 order = len(await self._scene_service.list_by_novel(novel.id) or []) + 1
-            is_final_for_roadmap = step_position >= max(roadmap.scenes_count, 1)
+            is_final_for_roadmap = position >= max(roadmap.scenes_count, 1)
             roadmaps = await self._roadmap_service.list_by_novel(novel.id) or []
-            is_last_roadmap = roadmap.step_id >= max(
-                (r.step_id for r in roadmaps), default=0
-            )
-            is_final_for_novel = is_final_for_roadmap and is_last_roadmap
+            # Финальная сцена новеллы = финальная сцена листового шага (концовки):
+            # у листа нет исходящих веток в дереве.
+            is_leaf = not any(r.parent_roadmap_id == roadmap.id for r in roadmaps)
+            is_final_for_novel = is_final_for_roadmap and is_leaf
 
         # 2) LLM-фаза: сборка промпта и ретрай-цикл — без транзакции.
         prompt = self.__create_prompt(
             novel,
             roadmap,
             characters,
-            step_position,
+            position,
             previous_scenes or [],
             story_context,
         )

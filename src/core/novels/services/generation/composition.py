@@ -2,7 +2,7 @@ import logging
 
 from src.core.novels.exceptions import GenerationError, NovelGenerationFailedError
 from src.core.novels.llm_trace import llm_trace
-from src.core.novels.models import Novel
+from src.core.novels.models import Novel, NovelMode
 from src.core.novels.services.generation.generators.character import CharacterGenerator
 from src.core.novels.services.generation.generators.dialogue import DialogueGenerator
 from src.core.novels.services.generation.generators.novel import NovelGenerator
@@ -37,6 +37,7 @@ class NovelCompositionService:
         self,
         user_promt: str,
         universe_id: int | None = None,
+        mode: NovelMode = NovelMode.LINEAR,
         *,
         step: TransactionFactory,
     ) -> Novel:
@@ -53,6 +54,7 @@ class NovelCompositionService:
                 novel = await self._novel_generator.generate(
                     user_promt,
                     universe_id=universe_id,
+                    mode=mode,
                     step=step,
                 )
                 trace.bind(novel.id)

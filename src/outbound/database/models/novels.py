@@ -2,7 +2,9 @@ from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from src.core.novels.models import NovelMode
 from src.outbound.database.models.base_model import BaseModel
+from src.outbound.database.utils import pg_enum
 
 
 class CharacterModel(BaseModel):
@@ -42,7 +44,7 @@ class RoadmapModel(BaseModel):
     novel_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("novels.id", ondelete="CASCADE"), nullable=False
     )
-    step_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    depth: Mapped[int] = mapped_column(Integer, nullable=False)
     title: Mapped[str] = mapped_column(String, nullable=False)
     event: Mapped[str] = mapped_column(String, nullable=False)
     conflict: Mapped[str] = mapped_column(String, nullable=False)
@@ -53,6 +55,13 @@ class RoadmapModel(BaseModel):
     location_slug: Mapped[str | None] = mapped_column(String, nullable=True)
     time_of_day: Mapped[str | None] = mapped_column(String, nullable=True)
     day: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    parent_roadmap_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("roadmap.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    branch_id: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     novel: Mapped["NovelModel"] = relationship("NovelModel", back_populates="roadmap")
 
@@ -64,8 +73,17 @@ class RoadmapModel(BaseModel):
         order_by="SceneModel.order",
     )
 
+    choices: Mapped[list["RoadmapChoiceModel"]] = relationship(
+        "RoadmapChoiceModel",
+        back_populates="roadmap",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        foreign_keys="RoadmapChoiceModel.roadmap_id",
+        order_by="RoadmapChoiceModel.order",
+    )
+
     def __repr__(self):
-        return f"<RoadmapModel(id={self.id}, step_id={self.step_id}, novel_id={self.novel_id})>"
+        return f"<RoadmapModel(id={self.id}, depth={self.depth}, novel_id={self.novel_id})>"
 
 
 class NovelModel(BaseModel):
@@ -77,6 +95,12 @@ class NovelModel(BaseModel):
     description: Mapped[str] = mapped_column(String, nullable=False)
     tone: Mapped[str] = mapped_column(String, nullable=False)
     universe_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    mode: Mapped[NovelMode] = mapped_column(
+        pg_enum(NovelMode, native=False),
+        nullable=False,
+        default=NovelMode.LINEAR,
+        server_default=NovelMode.LINEAR.value,
+    )
 
     characters: Mapped[list["CharacterModel"]] = relationship(
         "CharacterModel", back_populates="novel", cascade="all, delete-orphan", passive_deletes=True
@@ -86,7 +110,7 @@ class NovelModel(BaseModel):
         back_populates="novel",
         cascade="all, delete-orphan",
         passive_deletes=True,
-        order_by="RoadmapModel.step_id",
+        order_by="RoadmapModel.depth",
     )
     dialogue_lines: Mapped[list["DialogueLineModel"]] = relationship(
         "DialogueLineModel", back_populates="novel", cascade="all, delete-orphan", passive_deletes=True
@@ -171,33 +195,31 @@ class DialogueLineModel(BaseModel):
         "CharacterModel", back_populates="dialogue_lines"
     )
 
-    actions: Mapped[list["DialogueActionModel"]] = relationship(
-        "DialogueActionModel",
-        back_populates="dialogue_line",
-        cascade="all, delete-orphan",
-        passive_deletes=True,
-        order_by="DialogueActionModel.order",
-    )
-
     def __repr__(self):
         return f"<DialogueLineModel(id={self.id}, scene_id={self.scene_id}, character_id={self.character_id})>"
 
 
-class DialogueActionModel(BaseModel):
-    __tablename__ = "dialogue_actions"
+class RoadmapChoiceModel(BaseModel):
+    __tablename__ = "roadmap_choices"
 
-    dialogue_line_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("dialogue_lines.id", ondelete="CASCADE"), nullable=False, index=True
+    roadmap_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("roadmap.id", ondelete="CASCADE"), nullable=False, index=True
     )
 
     order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     text: Mapped[str] = mapped_column(String, nullable=False)
-    next_roadmap_id: Mapped[int] = mapped_column(
+    is_true: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    branch_direction: Mapped[str | None] = mapped_column(Text, nullable=True)
+    next_roadmap_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("roadmap.id", ondelete="SET NULL"), nullable=True
     )
 
-    dialogue_line: Mapped["DialogueLineModel"] = relationship(
-        "DialogueLineModel", back_populates="actions"
+    roadmap: Mapped["RoadmapModel"] = relationship(
+        "RoadmapModel",
+        back_populates="choices",
+        foreign_keys=[roadmap_id],
     )
     next_roadmap: Mapped["RoadmapModel"] = relationship(
         "RoadmapModel",
@@ -205,4 +227,24 @@ class DialogueActionModel(BaseModel):
     )
 
     def __repr__(self):
-        return f"<DialogueActionModel(id={self.id}, dialogue_line_id={self.dialogue_line_id})>"
+        return f"<RoadmapChoiceModel(id={self.id}, roadmap_id={self.roadmap_id}, is_true={self.is_true})>"
+
+
+class PlayerChoiceModel(BaseModel):
+    __tablename__ = "player_choices"
+
+    novel_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("novels.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    roadmap_choice_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("roadmap_choices.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    dialogue_line_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("dialogue_lines.id", ondelete="SET NULL"), nullable=True
+    )
+
+    novel: Mapped["NovelModel"] = relationship("NovelModel")
+    roadmap_choice: Mapped["RoadmapChoiceModel"] = relationship("RoadmapChoiceModel")
+
+    def __repr__(self):
+        return f"<PlayerChoiceModel(id={self.id}, novel_id={self.novel_id}, roadmap_choice_id={self.roadmap_choice_id})>"

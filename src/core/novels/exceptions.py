@@ -53,12 +53,17 @@ class NovelFinishedError(Exception):
 class SceneOrderError(Exception):
     """Запрошена сцена не по порядку: предыдущая ещё не сгенерирована."""
 
-    def __init__(self, novel_id: int, scene_order: int, next_scene_order: int):
+    def __init__(self, novel_id: int, requested: str, expected: str):
         self.novel_id = novel_id
-        self.scene_order = scene_order
-        self.next_scene_order = next_scene_order
+        self.requested = requested
+        self.expected = expected
         super().__init__(
-            f"Scene {scene_order} of novel {novel_id} cannot be generated: "
-            f"previous scene {scene_order - 1} is not generated yet "
-            f"(next scene to generate is {next_scene_order})"
+            f"Scene {requested} of novel {novel_id} cannot be generated: "
+            f"next scene to generate is {expected}"
         )
+
+
+class RoadmapChoiceNotFoundError(Exception):
+    def __init__(self, roadmap_choice_id: int):
+        self.roadmap_choice_id = roadmap_choice_id
+        super().__init__(f"Roadmap choice {roadmap_choice_id} not found")

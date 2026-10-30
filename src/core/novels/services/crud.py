@@ -1,17 +1,19 @@
 from src.core.novels.interfaces.repository import (
     CharacterRepositoryProtocol,
-    DialogueActionRepositoryProtocol,
     DialogueLineRepositoryProtocol,
     NovelRepositoryProtocol,
+    PlayerChoiceRepositoryProtocol,
+    RoadmapChoiceRepositoryProtocol,
     RoadmapRepositoryProtocol,
     SceneRepositoryProtocol,
 )
 from src.core.novels.models import (
     Character,
-    DialogueAction,
     DialogueLine,
     Novel,
+    PlayerChoice,
     Roadmap,
+    RoadmapChoice,
     Scene,
 )
 
@@ -131,17 +133,46 @@ class DialogueLineService:
         await self._repository.delete(dialog_line_id)
 
 
-class DialogueActionService:
-    def __init__(self, repository: DialogueActionRepositoryProtocol):
+class RoadmapChoiceService:
+    def __init__(self, repository: RoadmapChoiceRepositoryProtocol):
         self._repository = repository
 
-    async def add(self, dialog_action: DialogueAction) -> DialogueAction:
-        dialog_action = await self._repository.add(dialog_action)
-        return dialog_action
+    async def add(self, choice: RoadmapChoice) -> RoadmapChoice:
+        return await self._repository.add(choice)
 
-    async def get(self, dialog_action_id: int) -> DialogueAction | None:
-        dialog_action = await self._repository.get_by_id(dialog_action_id)
-        return dialog_action
+    async def get(self, choice_id: int) -> RoadmapChoice | None:
+        return await self._repository.get_by_id(choice_id)
 
-    async def delete(self, dialog_action_id: int) -> None:
-        await self._repository.delete(dialog_action_id)
+    async def list_by_roadmap(self, roadmap_id: int) -> list[RoadmapChoice]:
+        return await self._repository.list_by_roadmap_id(roadmap_id)
+
+    async def list_by_novel(self, novel_id: int) -> list[RoadmapChoice]:
+        return await self._repository.list_by_novel_id(novel_id)
+
+    async def update_next_roadmap(self, choice_id: int, next_roadmap_id: int) -> None:
+        await self._repository.update_next_roadmap(choice_id, next_roadmap_id)
+
+    async def delete(self, choice_id: int) -> None:
+        await self._repository.delete(choice_id)
+
+
+class PlayerChoiceService:
+    def __init__(self, repository: PlayerChoiceRepositoryProtocol):
+        self._repository = repository
+
+    async def add(self, player_choice: PlayerChoice) -> PlayerChoice:
+        return await self._repository.add(player_choice)
+
+    async def get(self, player_choice_id: int) -> PlayerChoice | None:
+        return await self._repository.get_by_id(player_choice_id)
+
+    async def list_by_novel(self, novel_id: int) -> list[PlayerChoice]:
+        return await self._repository.list_by_novel_id(novel_id)
+
+    async def get_by_roadmap_choice(
+        self, roadmap_choice_id: int
+    ) -> PlayerChoice | None:
+        return await self._repository.get_by_roadmap_choice_id(roadmap_choice_id)
+
+    async def delete(self, player_choice_id: int) -> None:
+        await self._repository.delete(player_choice_id)

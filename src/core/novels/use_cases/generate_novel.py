@@ -10,6 +10,7 @@ from src.core.novels.exceptions import (
 )
 from src.core.novels.interfaces.generation import JobLockProtocol
 from src.core.novels.interfaces.repository import NovelRepositoryProtocol
+from src.core.novels.models import NovelMode
 from src.core.novels.services.generation.composition import NovelCompositionService
 from src.core.novels.services.generation.transactions import TransactionFactory
 
@@ -46,6 +47,7 @@ class GenerateNovelUseCase:
         job_id: int,
         prompt: str,
         universe_id: int | None,
+        mode: NovelMode = NovelMode.LINEAR,
         *,
         step: TransactionFactory,
     ) -> GenerationJob:
@@ -67,7 +69,7 @@ class GenerateNovelUseCase:
 
             try:
                 novel = await self._composition_service.create(
-                    prompt, universe_id, step=step
+                    prompt, universe_id, mode, step=step
                 )
             except NovelGenerationFailedError as e:
                 logger.error("Generation job %s failed: %s", job_id, e)

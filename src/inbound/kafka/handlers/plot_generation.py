@@ -38,6 +38,7 @@ class NovelGenerateHandler:
                 job_id=schema.job_id,
                 prompt=schema.prompt,
                 universe_id=schema.universe_id,
+                mode=schema.mode,
                 step=session.begin,
             )
 

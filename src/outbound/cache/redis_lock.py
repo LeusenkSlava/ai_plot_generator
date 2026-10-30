@@ -118,10 +118,82 @@ class RedisJobLock:
 
 
 class RedisSceneLock:
-    """Блокировка генерации сцены по ``(novel_id, scene_order)``.
+    """Блокировка генерации сцены по ``(novel_id, roadmap_id, position)``.
 
     ``acquire`` блокирующий с таймаутом — повторяет старую семантику
     ``pg_advisory_xact_lock``, но без удержания транзакции/соединения Postgres.
+    """
+
+    def __init__(
+        self,
+        client: aioredis.Redis,
+        ttl_s: int,
+        acquire_timeout_s: float,
+        poll_interval_s: float,
+    ):
+        self._client = client
+        self._ttl_s = ttl_s
+        self._acquire_timeout_s = acquire_timeout_s
+        self._poll_interval_s = poll_interval_s
+        self._tokens: dict[tuple[int, int, int], str] = {}
+        self._renewer = _LockRenewer(client, ttl_s)
+
+    @staticmethod
+    def _key(novel_id: int, roadmap_id: int, position: int) -> str:
+        return f"gen:scene:{novel_id}:{roadmap_id}:{position}"
+
+    async def acquire(self, novel_id: int, roadmap_id: int, position: int) -> None:
+        key = self._key(novel_id, roadmap_id, position)
+        token = uuid.uuid4().hex
+        deadline = time.monotonic() + self._acquire_timeout_s
+        while True:
+            try:
+                ok = await self._client.set(key, token, nx=True, ex=self._ttl_s)
+            except aioredis.RedisError as e:
+                raise RedisLockError(
+                    f"Redis scene lock acquire failed for {key!r}: {e}"
+                ) from e
+            if ok:
+                self._tokens[(novel_id, roadmap_id, position)] = token
+                self._renewer.start(key, token)
+                return
+            if time.monotonic() >= deadline:
+                raise RedisLockError(
+                    f"Timed out acquiring scene lock {key!r} "
+                    f"after {self._acquire_timeout_s:.0f}s"
+                )
+            await asyncio.sleep(self._poll_interval_s)
+
+    async def release(self, novel_id: int, roadmap_id: int, position: int) -> None:
+        key = self._key(novel_id, roadmap_id, position)
+        token = self._tokens.pop((novel_id, roadmap_id, position), None)
+        if token is None:
+            return
+        await self._renewer.stop(key, token)
+        await _release(self._client, key, token)
+
+    async def is_locked(self, novel_id: int, roadmap_id: int, position: int) -> bool:
+        try:
+            return bool(
+                await self._client.exists(self._key(novel_id, roadmap_id, position))
+            )
+        except aioredis.RedisError as e:
+            # Только статус «generating» в плейбеке — деградируем в «не занято».
+            logger.warning(
+                "Redis scene lock is_locked(%s, %s, %s) failed: %s",
+                novel_id,
+                roadmap_id,
+                position,
+                e,
+            )
+            return False
+
+
+class RedisBranchLock:
+    """Блокировка ленивой генерации ветки по ``(novel_id, roadmap_choice_id)``.
+
+    ``acquire`` блокирующий с таймаутом — повторяет семантику RedisSceneLock, но для
+    генерации роадмапа ветки (ключ — вариант выбора, а не позиция сцены).
     """
 
     def __init__(
@@ -139,11 +211,11 @@ class RedisSceneLock:
         self._renewer = _LockRenewer(client, ttl_s)
 
     @staticmethod
-    def _key(novel_id: int, scene_order: int) -> str:
-        return f"gen:scene:{novel_id}:{scene_order}"
+    def _key(novel_id: int, roadmap_choice_id: int) -> str:
+        return f"gen:branch:{novel_id}:{roadmap_choice_id}"
 
-    async def acquire(self, novel_id: int, scene_order: int) -> None:
-        key = self._key(novel_id, scene_order)
+    async def acquire(self, novel_id: int, roadmap_choice_id: int) -> None:
+        key = self._key(novel_id, roadmap_choice_id)
         token = uuid.uuid4().hex
         deadline = time.monotonic() + self._acquire_timeout_s
         while True:
@@ -151,36 +223,23 @@ class RedisSceneLock:
                 ok = await self._client.set(key, token, nx=True, ex=self._ttl_s)
             except aioredis.RedisError as e:
                 raise RedisLockError(
-                    f"Redis scene lock acquire failed for {key!r}: {e}"
+                    f"Redis branch lock acquire failed for {key!r}: {e}"
                 ) from e
             if ok:
-                self._tokens[(novel_id, scene_order)] = token
+                self._tokens[(novel_id, roadmap_choice_id)] = token
                 self._renewer.start(key, token)
                 return
             if time.monotonic() >= deadline:
                 raise RedisLockError(
-                    f"Timed out acquiring scene lock {key!r} "
+                    f"Timed out acquiring branch lock {key!r} "
                     f"after {self._acquire_timeout_s:.0f}s"
                 )
             await asyncio.sleep(self._poll_interval_s)
 
-    async def release(self, novel_id: int, scene_order: int) -> None:
-        key = self._key(novel_id, scene_order)
-        token = self._tokens.pop((novel_id, scene_order), None)
+    async def release(self, novel_id: int, roadmap_choice_id: int) -> None:
+        key = self._key(novel_id, roadmap_choice_id)
+        token = self._tokens.pop((novel_id, roadmap_choice_id), None)
         if token is None:
             return
         await self._renewer.stop(key, token)
         await _release(self._client, key, token)
-
-    async def is_locked(self, novel_id: int, scene_order: int) -> bool:
-        try:
-            return bool(await self._client.exists(self._key(novel_id, scene_order)))
-        except aioredis.RedisError as e:
-            # Только статус «generating» в плейбеке — деградируем в «не занято».
-            logger.warning(
-                "Redis scene lock is_locked(%s, %s) failed: %s",
-                novel_id,
-                scene_order,
-                e,
-            )
-            return False

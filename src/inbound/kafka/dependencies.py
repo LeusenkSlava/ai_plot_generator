@@ -7,6 +7,8 @@ from src.core.novels.services.crud import (
     CharacterService,
     DialogueLineService,
     NovelService,
+    PlayerChoiceService,
+    RoadmapChoiceService,
     RoadmapService,
     SceneService,
 )
@@ -14,6 +16,7 @@ from src.core.novels.services.generation.assets import SceneAssetService
 from src.core.novels.services.generation.composition import NovelCompositionService
 from src.core.novels.services.generation.continuation import SceneContinuationService
 from src.core.novels.services.generation.generators import (
+    BranchRoadmapGenerator,
     CharacterGenerator,
     DialogueGenerator,
     NovelGenerator,
@@ -28,6 +31,7 @@ from src.core.novels.services.generation.generators.scene_roadmap_validator impo
     SceneRoadmapValidator,
 )
 from src.core.novels.use_cases import (
+    GenerateBranchUseCase,
     GenerateNovelUseCase,
     GenerateSceneUseCase,
 )
@@ -36,7 +40,7 @@ from src.outbound.ai.client import build_deepseek_client
 from src.outbound.ai.deepseek_client import DeepSeekGenerator
 from src.outbound.cache.client import build_redis_client
 from src.outbound.cache.redis_cache import RedisCache
-from src.outbound.cache.redis_lock import RedisJobLock, RedisSceneLock
+from src.outbound.cache.redis_lock import RedisBranchLock, RedisJobLock, RedisSceneLock
 from src.outbound.codex.client import build_codex_client
 from src.outbound.codex.codex_client import HttpCodexClient
 from src.outbound.database.repositories.generation_job_repository import (
@@ -46,6 +50,8 @@ from src.outbound.database.repositories.novel_repository import (
     CharacterRepository,
     DialogueLineRepository,
     NovelRepository,
+    PlayerChoiceRepository,
+    RoadmapChoiceRepository,
     RoadmapRepository,
     SceneRepository,
 )
@@ -58,6 +64,8 @@ class NovelRepositories:
     roadmap: RoadmapRepository
     scene: SceneRepository
     dialogue_line: DialogueLineRepository
+    roadmap_choice: RoadmapChoiceRepository
+    player_choice: PlayerChoiceRepository
 
 
 def build_novel_repositories(session: AsyncSession) -> NovelRepositories:
@@ -67,6 +75,8 @@ def build_novel_repositories(session: AsyncSession) -> NovelRepositories:
         roadmap=RoadmapRepository(session),
         scene=SceneRepository(session),
         dialogue_line=DialogueLineRepository(session),
+        roadmap_choice=RoadmapChoiceRepository(session),
+        player_choice=PlayerChoiceRepository(session),
     )
 
 
@@ -77,6 +87,8 @@ class NovelDomainServices:
     roadmap: RoadmapService
     scene: SceneService
     dialogue_line: DialogueLineService
+    roadmap_choice: RoadmapChoiceService
+    player_choice: PlayerChoiceService
 
 
 def build_novel_domain_services(
@@ -88,6 +100,8 @@ def build_novel_domain_services(
         roadmap=RoadmapService(repos.roadmap),
         scene=SceneService(repos.scene),
         dialogue_line=DialogueLineService(repos.dialogue_line),
+        roadmap_choice=RoadmapChoiceService(repos.roadmap_choice),
+        player_choice=PlayerChoiceService(repos.player_choice),
     )
 
 
@@ -99,6 +113,7 @@ class NovelGenerators:
     scene: SceneGenerator
     dialogue: DialogueGenerator
     story_context: StoryContextGenerator
+    branch_roadmap: BranchRoadmapGenerator
 
 
 def build_novel_generators(
@@ -160,6 +175,7 @@ def build_novel_generators(
             character_service=services.character,
             codex_service=codex_service,
             generator=roadmap_generator,
+            roadmap_choice_service=services.roadmap_choice,
             reasoning_effort=settings.deepseek.ROADMAP_REASONING_EFFORT,
             think=settings.deepseek.ROADMAP_THINK,
         ),
@@ -195,6 +211,16 @@ def build_novel_generators(
             character_service=services.character,
             dialogue_line_service=services.dialogue_line,
             generator=generator,
+        ),
+        branch_roadmap=BranchRoadmapGenerator(
+            novel_service=services.novel,
+            roadmap_service=services.roadmap,
+            character_service=services.character,
+            roadmap_choice_service=services.roadmap_choice,
+            codex_service=codex_service,
+            generator=roadmap_generator,
+            reasoning_effort=settings.deepseek.ROADMAP_REASONING_EFFORT,
+            think=settings.deepseek.ROADMAP_THINK,
         ),
     )
 
@@ -245,6 +271,8 @@ def build_generate_scene_use_case(
         roadmap_repository=repos.roadmap,
         scene_repository=repos.scene,
         dialogue_line_repository=repos.dialogue_line,
+        roadmap_choice_repository=repos.roadmap_choice,
+        player_choice_repository=repos.player_choice,
         scene_generator=generators.scene,
         dialogue_generator=generators.dialogue,
         story_context_generator=generators.story_context,
@@ -254,6 +282,24 @@ def build_generate_scene_use_case(
         jobs_repo=GenerationJobRepository(session),
         continuation_service=continuation,
         lock=RedisSceneLock(
+            build_redis_client(),
+            ttl_s=settings.generation.SCENE_LOCK_TTL_S,
+            acquire_timeout_s=settings.generation.SCENE_LOCK_ACQUIRE_TIMEOUT_S,
+            poll_interval_s=settings.generation.IN_PROGRESS_POLL_INTERVAL_S,
+        ),
+    )
+
+
+def build_generate_branch_use_case(
+    session: AsyncSession,
+) -> GenerateBranchUseCase:
+    repos, services, generators = _build_repos_services_generators(session)
+
+    return GenerateBranchUseCase(
+        jobs_repo=GenerationJobRepository(session),
+        choice_service=services.roadmap_choice,
+        branch_generator=generators.branch_roadmap,
+        lock=RedisBranchLock(
             build_redis_client(),
             ttl_s=settings.generation.SCENE_LOCK_TTL_S,
             acquire_timeout_s=settings.generation.SCENE_LOCK_ACQUIRE_TIMEOUT_S,
