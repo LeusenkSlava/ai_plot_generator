@@ -19,6 +19,8 @@
     .hint { color: #6b7280; font-size: 0.85rem; }
     .inline { display: flex; align-items: center; gap: 0.4rem; font-weight: 400; }
     .inline input { width: auto; }
+    .mock-fields { margin-top: 0.4rem; }
+    .mock-error { color: #b91c1c; }
     .error { background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c; border-radius: 8px; padding: 0.75rem 1rem; margin-top: 1rem; white-space: pre-wrap; }
     .result { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 1rem 1.25rem; margin-top: 1.5rem; max-width: 980px; }
     .meta { display: flex; flex-wrap: wrap; gap: 1rem; font-size: 0.9rem; margin-bottom: 0.75rem; }
@@ -50,9 +52,20 @@
       {% endfor %}
     </select>
 
-    <label>Мок (JSON {system_template, user_template}, необязательно)</label>
-    <textarea name="mock" rows="6" placeholder='{"system_template": "...", "user_template": "..."}'>{{ mock }}</textarea>
-    <div class="hint">Переопределяет шаблон локально; в БД ничего не пишется.</div>
+    <label class="inline"><input type="checkbox" name="mock" value="1" {% if mock_open %}checked{% endif %}> подменить шаблон (мок)</label>
+    <div class="hint">
+      Пустое поле — шаблон берётся из БД. Заполненное — переопределяет его локально,
+      в БД ничего не пишется.
+    </div>
+    <div class="mock-fields">
+      <label>system_template</label>
+      <textarea name="system_template" rows="8" placeholder="Пусто — взять из БД">{{ system_template }}</textarea>
+      <label>user_template</label>
+      <textarea name="user_template" rows="8" placeholder="Пусто — взять из БД">{{ user_template }}</textarea>
+    </div>
+    {% if mock_error %}
+    <div class="hint mock-error">Мок отклонён, показан шаблон из БД: {{ mock_error }}</div>
+    {% endif %}
 
     <label>Модель DeepSeek</label>
     <input type="text" name="model" value="{{ model or model_default }}">

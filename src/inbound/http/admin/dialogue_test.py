@@ -71,7 +71,9 @@ class DialogueTestAdmin(BaseView):
             {
                 "scene_id": (form.get("scene_id") or "").strip(),
                 "variant": (form.get("variant") or "").strip(),
-                "mock": (form.get("mock") or ""),
+                "mock_open": bool(form.get("mock")),
+                "system_template": (form.get("system_template") or ""),
+                "user_template": (form.get("user_template") or ""),
                 "model": (form.get("model") or "").strip(),
                 "temperature": (form.get("temperature") or "").strip(),
                 "think": bool(form.get("think")),
@@ -95,19 +97,8 @@ class DialogueTestAdmin(BaseView):
             context["error"] = f"Неизвестный вариант промптов: {variant!r}."
             return await self._render(request, context)
 
-        mock = None
-        mock_raw = (form.get("mock") or "").strip()
-        if mock_raw:
-            try:
-                mock = json.loads(mock_raw)
-            except json.JSONDecodeError as exc:
-                context["error"] = f"Мок не является валидным JSON: {exc}"
-                return await self._render(request, context)
-            if not isinstance(mock, dict):
-                context["error"] = (
-                    "Мок должен быть JSON-объектом вида {system_template, user_template}."
-                )
-                return await self._render(request, context)
+        # Мок — необязательный частичный шаблон: пустые поля берутся из БД.
+        mock = _extract_mock(context["system_template"], context["user_template"]) or None
 
         model = context["model"] or settings.deepseek.MODEL
         temperature_raw = context["temperature"]
@@ -133,6 +124,7 @@ class DialogueTestAdmin(BaseView):
                 temperature=temperature,
                 think=think,
                 render_only=render_only,
+                context=context,
             )
         except (
             Exception
@@ -158,7 +150,10 @@ class DialogueTestAdmin(BaseView):
             # Значения формы по умолчанию (на POST перезаписываются эхом).
             "scene_id": "",
             "variant": "",
-            "mock": "",
+            "mock_open": False,
+            "system_template": "",
+            "user_template": "",
+            "mock_error": None,
             "model": "",
             "temperature": "",
             "think": settings.deepseek.DIALOGUE_THINK,
@@ -198,6 +193,7 @@ class DialogueTestAdmin(BaseView):
         temperature: float,
         think: bool,
         render_only: bool,
+        context: dict | None = None,
     ) -> dict:
         async with async_session_factory() as session:
             tester = DialoguePromptTester(
@@ -208,26 +204,44 @@ class DialogueTestAdmin(BaseView):
                     log_call=lambda **kw: None,
                 ),
             )
-            if render_only:
-                result = await tester.render(scene_id, variant=variant, mock=mock)
-                return {
-                    "scene_id": result.scene_id,
-                    "scene_title": result.scene_title,
-                    "variant": result.variant,
-                    "version": result.version,
-                    "messages": result.messages,
-                    "lines": None,
-                    "raw": None,
-                }
+            # Невалидные плейсхолдеры мока не должны ронять тест: мок отбрасывается,
+            # рендерится шаблон из БД, а в ответе видно, что не так.
+            try:
+                if render_only:
+                    result = await tester.render(scene_id, variant=variant, mock=mock)
+                    return {
+                        "scene_id": result.scene_id,
+                        "scene_title": result.scene_title,
+                        "variant": result.variant,
+                        "version": result.version,
+                        "messages": result.messages,
+                        "lines": None,
+                        "raw": None,
+                    }
 
-            result = await tester.generate(
-                scene_id,
-                variant=variant,
-                mock=mock,
-                model=model,
-                temperature=temperature,
-                think=think,
-            )
+                result = await tester.generate(
+                    scene_id,
+                    variant=variant,
+                    mock=mock,
+                    model=model,
+                    temperature=temperature,
+                    think=think,
+                )
+            except (KeyError, ValueError) as exc:
+                if not mock:
+                    raise
+                if context is not None:
+                    context["mock_error"] = f"{type(exc).__name__}: {exc}"
+                return await DialogueTestAdmin._execute(
+                    scene_id,
+                    variant,
+                    None,
+                    model=model,
+                    temperature=temperature,
+                    think=think,
+                    render_only=render_only,
+                    context=context,
+                )
             return {
                 "scene_id": result.render.scene_id,
                 "scene_title": result.render.scene_title,
@@ -237,3 +251,20 @@ class DialogueTestAdmin(BaseView):
                 "lines": result.lines,
                 "raw": json.dumps(result.raw, ensure_ascii=False, indent=2),
             }
+
+
+def _extract_mock(system_template: str, user_template: str) -> dict:
+    """Собирает ``{system_template, user_template}`` из двух полей формы.
+
+    Пустые строки (или строка из одних пробелов) не попадают в мок — поле
+    считается незаданным. Если затронут один из шаблонов, мок остаётся
+    частичным, и второе поле берётся из БД.
+    """
+    mock = {}
+    for key, value in (
+        ("system_template", system_template),
+        ("user_template", user_template),
+    ):
+        if value and value.strip():
+            mock[key] = value
+    return mock
