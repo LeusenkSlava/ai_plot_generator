@@ -3,7 +3,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
-from src.core.novels.models import NovelMode, PromptVariant
+from src.core.novels.models import LineKind, NovelMode, PromptVariant
 
 
 class NovelCreateRequest(BaseModel):
@@ -46,7 +46,7 @@ class DialogueLineResponse(BaseModel):
     order: int
     text: str
     is_final_for_scene: bool
-    is_thought: bool
+    kind: LineKind
     background_asset_key: str | None
     sound_asset_key: str | None
     sprite_asset_key: str | None
@@ -69,7 +69,7 @@ class SceneResponse(BaseModel):
 class DialogueStepResponse(BaseModel):
     dialogue: DialogueLineResponse
     scene: SceneResponse
-    character: CharacterResponse
+    character: CharacterResponse | None
 
 
 class RoadmapChoiceResponse(BaseModel):

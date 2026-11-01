@@ -33,7 +33,7 @@ class PlaybackStatus(str, Enum):
 class DialogueStep:
     dialogue: DialogueLine
     scene: Scene
-    character: Character
+    character: Character | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,7 +158,11 @@ class NovelPlaybackService:
         scene = await self._scenes.get_by_id(line.scene_id)
         if scene is None:
             raise SceneNotFoundError(line.scene_id)
-        character = await self._characters.get_by_id(line.character_id)
-        if character is None:
-            raise CharacterNotFoundError(line.character_id)
+        if line.character_id is None:
+            # Narration-ремарка — говорящего персонажа нет.
+            character: Character | None = None
+        else:
+            character = await self._characters.get_by_id(line.character_id)
+            if character is None:
+                raise CharacterNotFoundError(line.character_id)
         return DialogueStep(dialogue=line, scene=scene, character=character)

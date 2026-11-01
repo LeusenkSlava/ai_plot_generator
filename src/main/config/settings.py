@@ -140,6 +140,17 @@ class GenerationSettings(BaseModel):
     SCENE_LOCK_ACQUIRE_TIMEOUT_S: float = 1200.0
 
 
+class AdminSettings(BaseModel):
+    """Встроенная админка (SQLAdmin): промпты + запуск скриптов генерации."""
+
+    ENABLED: bool = True
+    BASE_URL: str = "/admin"
+    TITLE: str = "AI Plot Generator — админка"
+    USERNAME: str = "admin"
+    PASSWORD: str = "admin"
+    SECRET_KEY: str = "dev-admin-secret-change-me"
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -154,6 +165,7 @@ class Settings(BaseSettings):
     redis: RedisSettings = RedisSettings()
     analytics: AnalyticsSettings = AnalyticsSettings()
     generation: GenerationSettings = GenerationSettings()
+    admin: AdminSettings = AdminSettings()
 
 
 settings = Settings()

@@ -10,13 +10,19 @@
        заканчиваются, сервис сам запускает генерацию следующей сцены; если
        сцена ещё не готова, `next` возвращает задачу, и скрипт ждёт её.
 
+В интерактивном режиме (`--mode interactive`) на реплике выбора скрипт сам
+выбирает «истинный» вариант (`is_true`) и идёт по основной ветке. На разветвлении
+с непустым `branch_direction` (форк) выбирается истинный вариант — скрипт не
+сворачивает в побочные ветки.
+
 В итоге новелла оказывается полностью сгенерированной в БД, и её можно сразу
 открыть в приложении без ожидания. Текст по желанию сохраняется в файл.
 
 Примеры:
     python3 scripts/generate_novel.py "Новелла про то, как герой учится писать промпты"
     python3 scripts/generate_novel.py "Детектив в киберпанке" --universe-id 1 --out novel.txt
-    python3 scripts/generate_novel.py "Романтика в поезде" --base-url http://my_choice.localhost
+    python3 scripts/generate_novel.py "Романтика в поезде" --mode interactive
+    python3 scripts/generate_novel.py "18+ история" --prompt-variant nsfw
     python3 scripts/generate_novel.py --novel-id 42 --out novel.txt
 
 Зависимости — только стандартная библиотека Python.
@@ -35,6 +41,13 @@ DEFAULT_BASE_URL = "http://my_choice.localhost"
 DEFAULT_JOB_TIMEOUT = 300.0   # секунд на одну задачу генерации
 DEFAULT_POLL_INTERVAL = 2.5   # интервал опроса статуса задачи
 DEFAULT_TOTAL_TIMEOUT = 1800.0  # общий лимит на весь прогон (30 минут)
+
+# Статусы воспроизведения, которые возвращает GET /novels/{id}/next.
+STATUS_OK = "ok"
+STATUS_CHOICE = "choice"
+STATUS_FINISHED = "finished"
+STATUS_NEED_GENERATION = "need_generation"
+STATUS_GENERATING = "generating"
 
 
 class ApiError(RuntimeError):
@@ -100,6 +113,22 @@ def wait_job(base_url: str, job_id: int, timeout: float, poll: float) -> dict:
         time.sleep(poll)
 
 
+def _render_line(speaker: str, text: str, kind: str) -> str:
+    if kind == "narration":
+        return f"[описание] {text}"
+    if kind == "thought":
+        return f"* {speaker} (мысль): {text}"
+    return f"{speaker}: {text}"
+
+
+def _find_true_choice(choices: list[dict]) -> dict | None:
+    """Истинный вариант выбора (основная ветка) или None."""
+    for choice in choices or []:
+        if choice.get("is_true"):
+            return choice
+    return (choices or [None])[0] if choices else None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Сгенерировать новеллу целиком через My Choice API.",
@@ -112,6 +141,18 @@ def main() -> int:
         help="ID уже созданной новеллы — пройти её до конца, не создавая новую",
     )
     parser.add_argument("--universe-id", type=int, default=None, help="ID вселенной Codex (необязательно)")
+    parser.add_argument(
+        "--mode",
+        choices=("linear", "interactive"),
+        default=None,
+        help="Режим новеллы (linear | interactive); по умолчанию linear",
+    )
+    parser.add_argument(
+        "--prompt-variant",
+        choices=("default", "nsfw"),
+        default=None,
+        help="Вариант набора промптов (default | nsfw); по умолчанию default",
+    )
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL, help=f"Адрес My Choice API (по умолчанию {DEFAULT_BASE_URL})")
     parser.add_argument("--out", default=None, help="Сохранить текст новеллы в файл")
     parser.add_argument("--job-timeout", type=float, default=DEFAULT_JOB_TIMEOUT, help="Таймаут одной задачи генерации, сек")
@@ -136,9 +177,13 @@ def main() -> int:
         print(f"Открываю существующую новеллу #{novel_id}", file=sys.stderr)
     else:
         # 1. Создать задачу генерации новеллы.
-        payload = {"prompt": prompt}
+        payload: dict = {"prompt": prompt}
         if args.universe_id is not None:
             payload["universe_id"] = args.universe_id
+        if args.mode is not None:
+            payload["mode"] = args.mode
+        if args.prompt_variant is not None:
+            payload["prompt_variant"] = args.prompt_variant
 
         print(f"Создаю новеллу: «{prompt}»", file=sys.stderr)
         status, body = call_json(base_url, "POST", "/novels/", payload)
@@ -180,6 +225,7 @@ def main() -> int:
 
     scene_count = 0
     line_count = 0
+    choice_count = 0
     current_scene_id: int | None = None
 
     def elapsed() -> float:
@@ -216,9 +262,83 @@ def main() -> int:
             raise ApiError(f"Неожиданный формат ответа: {body!r}")
 
         step_status = body.get("status")
-        if step_status == "finished":
+
+        # Реплики кончились, сцена генерируется/нужно сгенерировать: ждём и пробуем снова.
+        if step_status in (STATUS_NEED_GENERATION, STATUS_GENERATING):
+            where = ""
+            if "next_roadmap_id" in body or "next_position" in body:
+                where = (
+                    f" (roadmap={body.get('next_roadmap_id')}, "
+                    f"position={body.get('next_position')})"
+                )
+            elif "next_scene_order" in body:
+                where = f" (next_scene_order={body.get('next_scene_order')})"
+            print(f"  … жду сцену{where} (status={step_status})", file=sys.stderr)
+            time.sleep(args.poll)
+            continue
+
+        if step_status == STATUS_FINISHED:
             break
-        if step_status != "ok":
+
+        if step_status == STATUS_CHOICE:
+            # Интерактивная развилка: показываем реплику выбора и идём по истинной ветке.
+            step = body.get("step") or {}
+            dialogue = step.get("dialogue") or {}
+            scene = step.get("scene") or {}
+            character = step.get("character") or {}
+
+            if scene.get("id") != current_scene_id:
+                current_scene_id = scene.get("id")
+                scene_count += 1
+                header = f"\n--- Сцена {scene.get('order')}: {scene.get('title') or ''} ---"
+                transcript.append(header)
+                if not args.quiet:
+                    print(header)
+
+            line = _render_line(
+                character.get("name") or "…",
+                dialogue.get("text") or "",
+                dialogue.get("kind") or "speech",
+            )
+            transcript.append(line)
+            line_count += 1
+            if not args.quiet:
+                print(line)
+
+            choices = body.get("choices") or []
+            choice = _find_true_choice(choices)
+            if choice is None or choice.get("id") is None:
+                raise ApiError(f"На развилке нет варианта выбора: {body!r}")
+
+            choice_count += 1
+            if not args.quiet:
+                print(f"  → выбираю вариант #{choice['id']}: {choice.get('text') or ''}")
+
+            choose_status, choose_body = call_json(
+                base_url,
+                "POST",
+                f"/novels/{novel_id}/choice",
+                {
+                    "roadmap_choice_id": choice["id"],
+                    "dialogue_line_id": dialogue.get("id"),
+                },
+            )
+            if choose_status != 200:
+                raise ApiError(
+                    f"Не удалось зафиксировать выбор: HTTP {choose_status} {_detail(choose_body)}"
+                )
+            if isinstance(choose_body, dict) and choose_body.get("status") == "need_branch_generation":
+                raise ApiError(
+                    "Выбранный вариант требует генерации побочной ветки — "
+                    "скрипт не сворачивает в форки; выберите другой вариант."
+                )
+
+            offset = dialogue.get("id")
+            if offset is None:
+                raise ApiError(f"В реплике выбора нет id: {dialogue!r}")
+            continue
+
+        if step_status != STATUS_OK:
             raise ApiError(f"Неизвестный статус воспроизведения: {body!r}")
 
         step = body["step"]
@@ -234,12 +354,11 @@ def main() -> int:
             if not args.quiet:
                 print(header)
 
-        speaker = character.get("name") or "…"
-        text = dialogue.get("text") or ""
-        if dialogue.get("is_thought"):
-            line = f"* {speaker} (мысль): {text}"
-        else:
-            line = f"{speaker}: {text}"
+        line = _render_line(
+            character.get("name") or "…",
+            dialogue.get("text") or "",
+            dialogue.get("kind") or "speech",
+        )
         transcript.append(line)
         line_count += 1
         if not args.quiet:
@@ -250,7 +369,11 @@ def main() -> int:
             raise ApiError(f"В реплике нет id: {dialogue!r}")
 
     transcript.append("\n[конец новеллы]\n")
-    print(f"\nГотово за {elapsed():.0f} сек: сцен — {scene_count}, реплик — {line_count}.", file=sys.stderr)
+    print(
+        f"\nГотово за {elapsed():.0f} сек: сцен — {scene_count}, реплик — {line_count}, "
+        f"выборов — {choice_count}.",
+        file=sys.stderr,
+    )
 
     if args.out:
         with open(args.out, "w", encoding="utf-8") as file:

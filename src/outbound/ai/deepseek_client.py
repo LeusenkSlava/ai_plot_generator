@@ -1,6 +1,7 @@
 import json
 import logging
 import time
+from collections.abc import Callable
 
 from json_repair import repair_json
 from openai import APIConnectionError, APIError, AsyncOpenAI
@@ -50,10 +51,20 @@ class DeepSeekGenerator:
         client: AsyncOpenAI,
         temperature: float = 0.9,
         model: str = settings.deepseek.MODEL,
+        *,
+        log_call: Callable[..., None] | None = None,
     ):
         self._client = client
         self._temperature = temperature
         self._model = model
+        # Отключаемая аналитика. ``None`` — дефолтный ``log_llm_call`` (резолвится
+        # в момент вызова, чтобы тесты могли подменять модульный ``log_llm_call``);
+        # инструменты передают ``lambda **kw: None``, чтобы не писать в llm.usage.
+        self._log_call = log_call
+
+    def _log(self, **kwargs: object) -> None:
+        sink = self._log_call if self._log_call is not None else log_llm_call
+        sink(**kwargs)
 
     async def generate(
         self,
@@ -61,10 +72,11 @@ class DeepSeekGenerator:
         think: bool = True,
         reasoning_effort: str | None = None,
         temperature: float | None = None,
+        model: str | None = None,
     ) -> dict:
         started = time.monotonic()
         request = {
-            "model": self._model,
+            "model": model if model is not None else self._model,
             "messages": prompt,
             "response_format": {"type": "json_object"},
             "temperature": (
@@ -78,7 +90,7 @@ class DeepSeekGenerator:
         try:
             response = await self._client.chat.completions.create(**request)
         except (APIError, APIConnectionError) as e:
-            log_llm_call(
+            self._log(
                 model=self._model,
                 messages=prompt,
                 response=None,
@@ -119,7 +131,7 @@ class DeepSeekGenerator:
         }
         if json_repaired:
             extra["json_repaired"] = True
-        log_llm_call(
+        self._log(
             model=self._model,
             messages=prompt,
             response=content,

@@ -1,6 +1,13 @@
 from datetime import datetime
 
-from src.core.novels.models import Character, DialogueLine, Novel, Roadmap, Scene
+from src.core.novels.models import (
+    Character,
+    DialogueLine,
+    LineKind,
+    Novel,
+    Roadmap,
+    Scene,
+)
 
 
 def novel_character_domain(
@@ -151,11 +158,11 @@ def dialogue_line_domain(
     updated_at: datetime | None = None,
     novel_id: int = 1,
     scene_id: int = 1,
-    character_id: int = 1,
+    character_id: int | None = 1,
     order: int = 1,
     text: str = "Реплика",
     is_final_for_scene: bool = False,
-    is_thought: bool = False,
+    kind: LineKind = LineKind.SPEECH,
     background_asset_key: str | None = None,
     sound_asset_key: str | None = None,
     sprite_asset_key: str | None = None,
@@ -172,7 +179,7 @@ def dialogue_line_domain(
         order=order,
         text=text,
         is_final_for_scene=is_final_for_scene,
-        is_thought=is_thought,
+        kind=kind,
         background_asset_key=background_asset_key,
         sound_asset_key=sound_asset_key,
         sprite_asset_key=sprite_asset_key,

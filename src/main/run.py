@@ -5,6 +5,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from src.inbound.http.admin import setup_admin
 from src.inbound.http.root_router import make_fastapi_root_router
 from src.inbound.kafka.consumer import build_consumer
 from src.inbound.kafka.handlers import build_topic_handlers
@@ -105,3 +106,5 @@ app.add_middleware(
 )
 
 app.include_router(make_fastapi_root_router(debug_mode=settings.app.DEBUG_MODE))
+
+setup_admin(app)

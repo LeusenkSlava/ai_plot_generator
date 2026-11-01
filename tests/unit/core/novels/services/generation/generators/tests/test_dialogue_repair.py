@@ -2,10 +2,12 @@
 
 import pytest
 
+from src.core.novels.models import LineKind
 from src.core.novels.services.generation.assets import SceneAssetService
 from src.core.novels.services.generation.generators.dialogue_repair import (
     DefectKind,
     DialogueRepairService,
+    parse_line_kind,
 )
 from tests.factories import dialogue_line_domain
 from tests.fakes.outbound.ai.generator import FakeGenerator
@@ -26,6 +28,32 @@ def _line(name: str, text: str) -> dict:
 VALID_NAMES = ["Алиса", "Боб"]
 
 
+class TestParseLineKind:
+    def test_known_lowercase(self):
+        assert parse_line_kind("speech") is LineKind.SPEECH
+        assert parse_line_kind("thought") is LineKind.THOUGHT
+        assert parse_line_kind("narration") is LineKind.NARRATION
+
+    def test_case_is_normalized(self):
+        assert parse_line_kind("Speech") is LineKind.SPEECH
+        assert parse_line_kind("NARRATION") is LineKind.NARRATION
+        assert parse_line_kind("  Thought ") is LineKind.THOUGHT
+
+    def test_missing_or_empty_defaults_to_speech(self):
+        # Значение по умолчанию поля DialogueLine.kind — не дефект.
+        assert parse_line_kind(None) is LineKind.SPEECH
+        assert parse_line_kind("") is LineKind.SPEECH
+        assert parse_line_kind("   ") is LineKind.SPEECH
+
+    def test_unknown_returns_none(self):
+        assert parse_line_kind("inner") is None
+        assert parse_line_kind("description") is None
+        assert parse_line_kind(42) is None
+
+    def test_line_kind_instance_passthrough(self):
+        assert parse_line_kind(LineKind.NARRATION) is LineKind.NARRATION
+
+
 class TestClassify:
     def test_empty_lines_is_no_lines(self, repair):
         defects = repair.classify([], VALID_NAMES)
@@ -40,6 +68,15 @@ class TestClassify:
     def test_unknown_character(self, repair):
         defects = repair.classify([_line("Незнакомец", "Кто я?")], VALID_NAMES)
         assert defects[0].kind is DefectKind.UNKNOWN_CHARACTER
+        assert defects[0].line_index == 0
+
+    def test_unknown_kind(self, repair):
+        # Опознанный спикер, но неизвестный kind — не должен молча стать speech.
+        defects = repair.classify(
+            [{"kind": "inner", "character_name": "Алиса", "text": "Привет."}],
+            VALID_NAMES,
+        )
+        assert defects[0].kind is DefectKind.UNKNOWN_KIND
         assert defects[0].line_index == 0
 
     def test_empty_text(self, repair):
@@ -231,3 +268,54 @@ class TestRepairLines:
         )
         assert result.has_unfixable
         assert result.unfixable[0].kind is DefectKind.TRUNCATED_END
+
+    async def test_kind_case_normalized_without_llm(self, repair):
+        generator = repair._generator
+        result = await repair.repair_lines(
+            [
+                {"kind": "Speech", "character_name": "Алиса", "text": "Привет."},
+                {"kind": "NARRATION", "character_name": None, "text": "Ночь опустилась."},
+            ],
+            VALID_NAMES,
+        )
+        assert not result.has_unfixable
+        assert result.lines_data[0]["kind"] == "speech"
+        assert result.lines_data[1]["kind"] == "narration"
+        assert generator.call_count == 0  # регистр чинится детерминированно
+
+    async def test_unknown_kind_repaired_by_llm(self, repair):
+        generator = repair._generator
+        generator.returns(
+            {
+                "fixes": [
+                    {"index": 1, "kind": "narration", "character_name": None,
+                     "text": "Ночь опустилась."}
+                ]
+            }
+        )
+        result = await repair.repair_lines(
+            [{"kind": "inner", "character_name": "Алиса", "text": "Ночь опустилась."}],
+            VALID_NAMES,
+        )
+        assert not result.has_unfixable
+        assert result.lines_data[0]["kind"] == "narration"
+        assert result.lines_data[0]["character_name"] is None
+        assert generator.call_count == 1
+
+    async def test_unknown_kind_unfixable_after_llm(self, repair):
+        generator = repair._generator
+        # LLM снова вернул неизвестный kind → остаётся неисправимым.
+        generator.returns(
+            {
+                "fixes": [
+                    {"index": 1, "kind": "inner", "character_name": "Алиса",
+                     "text": "Ночь опустилась."}
+                ]
+            }
+        )
+        result = await repair.repair_lines(
+            [{"kind": "inner", "character_name": "Алиса", "text": "Ночь опустилась."}],
+            VALID_NAMES,
+        )
+        assert result.has_unfixable
+        assert result.unfixable[0].kind is DefectKind.UNKNOWN_KIND

@@ -4,6 +4,7 @@ import pytest
 
 from src.core.codex.models import BackgroundTags, Tag, TagKind, TagType, VisualMatch
 from src.core.novels.exceptions import GenerationError
+from src.core.novels.models import LineKind
 from src.core.novels.services.crud import (
     CharacterService,
     DialogueLineService,
@@ -960,16 +961,16 @@ class TestProtagonist:
             valid_dialogue_llm_payload(
                 dialogue_line_payload(
                     character_name="Алиса", text="Я не должна бояться.",
-                    is_thought=True,
+                    kind="thought",
                 ),
                 dialogue_line_payload(
-                    character_name="Боб", text="Ты справишься.", is_thought=True,
+                    character_name="Боб", text="Ты справишься.", kind="thought",
                 ),
             )
         )
 
         result = await sut.generate(scene_id=protagonist_world.scene.id)
 
-        assert result[0].is_thought is True
-        # is_thought значим только для протагониста — для остальных принудительно false
-        assert result[1].is_thought is False
+        assert result[0].kind is LineKind.THOUGHT
+        # thought значим только для протагониста — для остальных принудительно speech
+        assert result[1].kind is LineKind.SPEECH

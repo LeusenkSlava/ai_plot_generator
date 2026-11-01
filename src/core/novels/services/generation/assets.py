@@ -111,9 +111,13 @@ class SceneAssetService:
 
     @staticmethod
     def prepare_line(
-        item: dict, character: Character, assets: SceneAssets
+        item: dict, character: Character | None, assets: SceneAssets
     ) -> LineAssets:
-        """Переводит выбранные LLM теги в запросы подбора ассетов Codex."""
+        """Переводит выбранные LLM теги в запросы подбора ассетов Codex.
+
+        ``character is None`` — narration-ремарка: у неё нет спрайта/наряда/эмоции,
+        задаётся только фон.
+        """
         line = LineAssets()
         if not assets:
             return line
@@ -123,8 +127,8 @@ class SceneAssetService:
             modifier_tags = item.get("background_modifier_tags") or []
             line.background_tags = [base_tag, *modifier_tags]
 
-        if character.is_protagonist:
-            # Протагонист на экране не показывается: наряд/эмоция не нужны.
+        if character is None or character.is_protagonist:
+            # Narration / протагонист на экране не показывается: наряд/эмоция не нужны.
             return line
 
         base_tag = item.get("emotion_base_tag")
@@ -182,13 +186,15 @@ class SceneAssetService:
 
     async def match_assets(
         self,
-        prepared: list[tuple[Character, dict, LineAssets]],
+        prepared: list[tuple[Character | None, dict, LineAssets]],
         assets: SceneAssets,
         universe_id: int | None,
     ) -> list[ResolvedAssets]:
         """Подбирает фон по тегам и визуал (спрайт+наряд+эмоцию) через Codex."""
 
-        async def resolve(character: Character, line: LineAssets) -> ResolvedAssets:
+        async def resolve(
+            character: Character | None, line: LineAssets
+        ) -> ResolvedAssets:
             result = ResolvedAssets()
 
             # Фон подбирается по тегам-смыслам через Codex (как и визуал).
@@ -212,8 +218,8 @@ class SceneAssetService:
                         f"tags={line.background_tags}"
                     )
 
-            if character.is_protagonist:
-                # Протагонист без спрайта — подбирать визуал не нужно.
+            if character is None or character.is_protagonist:
+                # Narration / протагонист без спрайта — подбирать визуал не нужно.
                 return result
             codex_id = character.codex_character_id
 

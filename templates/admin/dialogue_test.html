@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>Тест диалога</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem; color: #1f2937; background: #f8fafc; }
+    h1 { font-size: 1.5rem; }
+    h2 { font-size: 1.1rem; margin-top: 2rem; }
+    nav { margin-bottom: 1.5rem; }
+    nav a { margin-right: 1rem; color: #2563eb; }
+    form { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 1rem 1.25rem; max-width: 780px; }
+    label { display: block; margin: 0.6rem 0 0.2rem; font-weight: 600; font-size: 0.9rem; }
+    input[type=text], input[type=number], select, textarea {
+      width: 100%; padding: 0.45rem 0.6rem; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.95rem; box-sizing: border-box;
+    }
+    textarea { font-family: ui-monospace, monospace; font-size: 0.85rem; }
+    button { margin-top: 1rem; padding: 0.5rem 1.1rem; border: 0; border-radius: 6px; background: #2563eb; color: #fff; font-size: 0.95rem; cursor: pointer; }
+    .hint { color: #6b7280; font-size: 0.85rem; }
+    .inline { display: flex; align-items: center; gap: 0.4rem; font-weight: 400; }
+    .inline input { width: auto; }
+    .error { background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c; border-radius: 8px; padding: 0.75rem 1rem; margin-top: 1rem; white-space: pre-wrap; }
+    .result { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 1rem 1.25rem; margin-top: 1.5rem; max-width: 980px; }
+    .meta { display: flex; flex-wrap: wrap; gap: 1rem; font-size: 0.9rem; margin-bottom: 0.75rem; }
+    .meta code { background: #f1f5f9; padding: 0.15rem 0.4rem; border-radius: 4px; }
+    pre { background: #0f172a; color: #e2e8f0; padding: 1rem; border-radius: 8px; overflow: auto; white-space: pre-wrap; font-size: 0.85rem; line-height: 1.45; }
+    .role { font-weight: 600; margin: 1rem 0 0.3rem; text-transform: uppercase; font-size: 0.8rem; color: #475569; }
+    ul.lines { padding-left: 1.2rem; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <nav>
+    <a href="{{ base_url }}/">Админка</a>
+    <a href="{{ base_url }}/prompt-model/list">Промпты</a>
+  </nav>
+  <h1>Тест диалога (in-process)</h1>
+  <p class="hint">
+    Промпт собирает ровно тот же <code>DialoguePromptBuilder</code>, что и прод; генерация идёт через общий
+    <code>DeepSeekGenerator</code> без аналитики. В БД ничего не пишется.
+  </p>
+
+  <form method="post" action="{{ post_url }}">
+    <label>ID сцены в БД *</label>
+    <input type="number" name="scene_id" required min="1" step="1" value="{{ scene_id }}">
+
+    <label>Вариант промптов</label>
+    <select name="variant">
+      {% for value, label in variants %}
+      <option value="{{ value }}" {% if variant == value %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+
+    <label>Мок (JSON {system_template, user_template}, необязательно)</label>
+    <textarea name="mock" rows="6" placeholder='{"system_template": "...", "user_template": "..."}'>{{ mock }}</textarea>
+    <div class="hint">Переопределяет шаблон локально; в БД ничего не пишется.</div>
+
+    <label>Модель DeepSeek</label>
+    <input type="text" name="model" value="{{ model or model_default }}">
+
+    <label>Температура</label>
+    <input type="number" name="temperature" step="0.1" min="0" max="2" value="{{ temperature or temperature_default }}">
+
+    <label class="inline"><input type="checkbox" name="think" value="1" {% if think %}checked{% endif %}> thinking-режим</label>
+    <label class="inline"><input type="checkbox" name="render_only" value="1" {% if render_only %}checked{% endif %}> только показать промпт (без вызова LLM)</label>
+
+    <button type="submit">Запустить</button>
+  </form>
+
+  {% if error %}
+  <div class="error">{{ error }}</div>
+  {% endif %}
+
+  {% if result %}
+  <div class="result">
+    <h2>Результат</h2>
+    <div class="meta">
+      <span>Сцена: <code>#{{ result.scene_id }}</code></span>
+      <span>Название: <code>{{ result.scene_title }}</code></span>
+      <span>Вариант: <code>{{ result.variant }}</code></span>
+      <span>Версия шаблона: <code>{{ result.version }}</code></span>
+    </div>
+
+    {% for message in result.messages %}
+    <div class="role">{{ message.role }}</div>
+    <pre>{{ message.content }}</pre>
+    {% endfor %}
+
+    {% if result.lines is not none %}
+    <h2>Реплики</h2>
+    <ul class="lines">
+      {% for line in result.lines %}
+      <li>{{ line }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+
+    {% if result.raw %}
+    <h2>Сырой JSON ответа</h2>
+    <pre>{{ result.raw }}</pre>
+    {% endif %}
+  </div>
+  {% endif %}
+</body>
+</html>

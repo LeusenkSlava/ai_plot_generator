@@ -13,6 +13,14 @@ class NovelMode(StrEnum):
     INTERACTIVE = "interactive"
 
 
+class LineKind(StrEnum):
+    """Тип реплики диалога"""
+
+    SPEECH = "speech"
+    THOUGHT = "thought"
+    NARRATION = "narration"
+
+
 class PromptVariant(StrEnum):
     """Набор шаблонов промптов, используемых при генерации новеллы.
 
@@ -172,15 +180,15 @@ class DialogueLine:
 
     novel_id: int
     scene_id: int
-    character_id: int
+    # NULL только для kind="narration" (описание без говорящего).
+    character_id: int | None
 
     order: int
     text: str
     # последняя реплика сцены
     is_final_for_scene: bool
-    # внутренние мысли персонажа (не произносится вслух). Значимо только для
-    # протагониста; для остальных персонажей всегда false.
-    is_thought: bool = False
+    # Тип реплики: речь вслух / внутренние мысли протагониста / описание-ремарка.
+    kind: LineKind = LineKind.SPEECH
 
     # asset_key ассетов Codex; заполняются только для новелл с universe_id
     background_asset_key: str | None = None

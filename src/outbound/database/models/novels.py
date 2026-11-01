@@ -2,7 +2,7 @@ from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.core.novels.models import DEFAULT_PROMPT_VARIANT, NovelMode
+from src.core.novels.models import DEFAULT_PROMPT_VARIANT, LineKind, NovelMode
 from src.outbound.database.models.base_model import BaseModel
 from src.outbound.database.utils import pg_enum
 
@@ -175,8 +175,8 @@ class DialogueLineModel(BaseModel):
     scene_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("scenes.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    character_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("characters.id", ondelete="CASCADE"), nullable=False, index=True
+    character_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("characters.id", ondelete="CASCADE"), nullable=True, index=True
     )
 
     order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -184,7 +184,12 @@ class DialogueLineModel(BaseModel):
     is_final_for_scene: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False
     )
-    is_thought: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    kind: Mapped[LineKind] = mapped_column(
+        pg_enum(LineKind, native=False),
+        nullable=False,
+        default=LineKind.SPEECH,
+        server_default=LineKind.SPEECH.value,
+    )
     background_asset_key: Mapped[str | None] = mapped_column(String, nullable=True)
     sound_asset_key: Mapped[str | None] = mapped_column(String, nullable=True)
     sprite_asset_key: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -197,7 +202,7 @@ class DialogueLineModel(BaseModel):
     scene: Mapped["SceneModel"] = relationship(
         "SceneModel", back_populates="dialogue_lines"
     )
-    character: Mapped["CharacterModel"] = relationship(
+    character: Mapped["CharacterModel | None"] = relationship(
         "CharacterModel", back_populates="dialogue_lines"
     )
 

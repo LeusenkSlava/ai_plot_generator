@@ -89,3 +89,7 @@ __pycache__/
 llm_logs/
 .pytest_cache/
 docs/
+
+# Логи запусков скриптов из админки и локальный мок промпта
+scripts/runs/
+scripts/mocks/dialogue.json

@@ -303,7 +303,7 @@ class DialogueLineRepository:
             order=dialog_line.order,
             text=dialog_line.text,
             is_final_for_scene=dialog_line.is_final_for_scene,
-            is_thought=dialog_line.is_thought,
+            kind=dialog_line.kind,
             background_asset_key=dialog_line.background_asset_key,
             sound_asset_key=dialog_line.sound_asset_key,
             sprite_asset_key=dialog_line.sprite_asset_key,
@@ -352,6 +352,7 @@ class DialogueLineRepository:
             .where(
                 DialogueLineModel.novel_id == novel_id,
                 DialogueLineModel.outfit_asset_key.isnot(None),
+                DialogueLineModel.character_id.isnot(None),
             )
             .distinct(DialogueLineModel.character_id)
             .order_by(
@@ -379,7 +380,7 @@ class DialogueLineRepository:
             order=db_dialog_line.order,
             text=db_dialog_line.text,
             is_final_for_scene=db_dialog_line.is_final_for_scene,
-            is_thought=db_dialog_line.is_thought,
+            kind=db_dialog_line.kind,
             background_asset_key=db_dialog_line.background_asset_key,
             sound_asset_key=db_dialog_line.sound_asset_key,
             sprite_asset_key=db_dialog_line.sprite_asset_key,

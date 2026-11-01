@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from src.core.novels.interfaces.generation import GeneratorProtocol
-from src.core.novels.models import Character, DialogueLine
+from src.core.novels.models import Character, DialogueLine, LineKind
 from src.core.novels.services.generation.assets import (
     LineAssets,
     ResolvedAssets,
@@ -52,12 +52,39 @@ def _is_truncated(text: str) -> bool:
     return stripped[-1] not in _SENTENCE_ENDERS
 
 
+def parse_line_kind(value: object) -> LineKind | None:
+    """Строго разбирает ``kind`` из ответа LLM, регистронезависимо.
+
+    Возвращает ``None`` только для **присутствующего, но неизвестного** значения
+    (опечатка/новый вид, например ``"inner"``) — это дефект ``UNKNOWN_KIND``, а не
+    тихое превращение в ``SPEECH``. Отсутствующий или пустой ``kind`` трактуется как
+    ``LineKind.SPEECH`` — значение по умолчанию поля ``DialogueLine.kind``.
+    """
+    if isinstance(value, LineKind):
+        return value
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return LineKind.SPEECH
+    if not isinstance(value, str):
+        return None
+    try:
+        return LineKind(value.strip().lower())
+    except ValueError:
+        return None
+
+
+def _kind_label(value: object) -> str:
+    """Каноническое значение ``kind`` для промпта ремонта или repr неизвестного."""
+    parsed = parse_line_kind(value)
+    return parsed.value if parsed is not None else repr(value)
+
+
 class DefectKind(Enum):
     NO_LINES = "no_lines"  # неисправимо → полный ретрай
     UNKNOWN_CHARACTER = "unknown_character"  # точечный LLM-фикс + фуззи-фолбэк
     EMPTY_TEXT = "empty_text"  # детерминированно (выкинуть строку)
     DUPLICATE_LINE = "duplicate_line"  # детерминированно (дедуп точных повторов)
     TRUNCATED_END = "truncated_end"  # точечный LLM-фикс (дописать финал)
+    UNKNOWN_KIND = "unknown_kind"  # точечный LLM-фикс (регистр/опечатка в kind)
 
 
 @dataclass(frozen=True)
@@ -115,6 +142,19 @@ class DialogueRepairService(BaseGenerator):
         defects: list[DialogueDefect] = []
         last_index = len(lines_data) - 1
 
+        def check_text(index: int, text: object) -> None:
+            """EMPTY_TEXT / DUPLICATE_LINE для реплики — общий для всех ``kind``."""
+            if not isinstance(text, str) or not _normalize(text):
+                defects.append(DialogueDefect(DefectKind.EMPTY_TEXT, index))
+            else:
+                normalized = _normalize(text)
+                if normalized in seen_texts:
+                    defects.append(
+                        DialogueDefect(DefectKind.DUPLICATE_LINE, index)
+                    )
+                else:
+                    seen_texts.add(normalized)
+
         for index, item in enumerate(lines_data):
             if not isinstance(item, dict):
                 defects.append(
@@ -126,28 +166,37 @@ class DialogueRepairService(BaseGenerator):
                 )
                 continue
 
+            kind = parse_line_kind(item.get("kind"))
             name = item.get("character_name")
             text = item.get("text")
             if isinstance(name, str):
                 name = name.strip()
 
-            if not isinstance(name, str) or not name or name not in valid:
+            if kind is None:
+                # Неизвестный kind (опечатка/новый вид) — дефект, который отправит
+                # реплику в ремонт. Имя пока не проверяем: неясно, narration это или
+                # речь, а silent-fallback в SPEECH замаскировал бы порчу данных.
                 defects.append(
                     DialogueDefect(
-                        DefectKind.UNKNOWN_CHARACTER,
+                        DefectKind.UNKNOWN_KIND,
                         index,
-                        f"unknown character {name!r}",
+                        f"unknown kind {item.get('kind')!r}",
                     )
                 )
-
-            if not isinstance(text, str) or not _normalize(text):
-                defects.append(DialogueDefect(DefectKind.EMPTY_TEXT, index))
+                check_text(index, text)
+            elif kind is LineKind.NARRATION:
+                # Narration — ремарка без говорящего: имя не требуется.
+                check_text(index, text)
             else:
-                normalized = _normalize(text)
-                if normalized in seen_texts:
-                    defects.append(DialogueDefect(DefectKind.DUPLICATE_LINE, index))
-                else:
-                    seen_texts.add(normalized)
+                if not isinstance(name, str) or not name or name not in valid:
+                    defects.append(
+                        DialogueDefect(
+                            DefectKind.UNKNOWN_CHARACTER,
+                            index,
+                            f"unknown character {name!r}",
+                        )
+                    )
+                check_text(index, text)
 
             if index == last_index and isinstance(text, str) and _is_truncated(text):
                 defects.append(DialogueDefect(DefectKind.TRUNCATED_END, index))
@@ -167,9 +216,10 @@ class DialogueRepairService(BaseGenerator):
         """Структурный ремонт реплик до резолва ассетов.
 
         Детерминированные фиксы (дедуп повторов, отбрасывание пустого ``text``,
-        фуззи-ремап имён), затем один батч-запрос ``think=False`` на оставшиеся
-        дефекты (неизвестное имя, обрыв последней реплики). Возвращает исправленный
-        ``lines_data`` и список неисправимых дефектов (повод для полного ретрая).
+        нормализация регистра ``kind``, фуззи-ремап имён), затем один батч-запрос
+        ``think=False`` на оставшиеся дефекты (неизвестное имя, неизвестный ``kind``,
+        обрыв последней реплики). Возвращает исправленный ``lines_data`` и список
+        неисправимых дефектов (повод для полного ретрая).
         """
         if not lines_data:
             return RepairResult(
@@ -189,6 +239,7 @@ class DialogueRepairService(BaseGenerator):
                     )
                 ],
             )
+        repaired = self._normalize_kinds(repaired)
         repaired = self._fuzzy_remap_names(repaired, valid_names)
 
         # 2. Оставшиеся дефекты, требующие LLM, — одним батч-запросом.
@@ -196,7 +247,12 @@ class DialogueRepairService(BaseGenerator):
         needs_llm = [
             d
             for d in defects
-            if d.kind in (DefectKind.UNKNOWN_CHARACTER, DefectKind.TRUNCATED_END)
+            if d.kind
+            in (
+                DefectKind.UNKNOWN_CHARACTER,
+                DefectKind.UNKNOWN_KIND,
+                DefectKind.TRUNCATED_END,
+            )
         ]
         if needs_llm:
             repaired = await self._llm_fix_lines(repaired, valid_names, needs_llm)
@@ -210,10 +266,28 @@ class DialogueRepairService(BaseGenerator):
             in (
                 DefectKind.NO_LINES,
                 DefectKind.UNKNOWN_CHARACTER,
+                DefectKind.UNKNOWN_KIND,
                 DefectKind.TRUNCATED_END,
             )
         ]
         return RepairResult(repaired, unfixable)
+
+    @staticmethod
+    def _normalize_kinds(lines_data: list[dict]) -> list[dict]:
+        """Канонизирует ``kind`` (регистр) детерминированно, без LLM.
+
+        ``"Speech"``/``"NARRATION"`` → ``"speech"``/``"narration"``; отсутствующий
+        ``kind`` → ``"speech"`` (значение по умолчанию). По-настоящему неизвестное
+        значение (``"inner"``) оставляется как есть — его классифицирует ``classify``
+        как ``UNKNOWN_KIND`` и чинит LLM-ремонт.
+        """
+        for item in lines_data:
+            if not isinstance(item, dict):
+                continue
+            parsed = parse_line_kind(item.get("kind"))
+            if parsed is not None:
+                item["kind"] = parsed.value
+        return lines_data
 
     def _drop_empty_and_duplicates(
         self,
@@ -244,6 +318,15 @@ class DialogueRepairService(BaseGenerator):
         for item in lines_data:
             if not isinstance(item, dict):
                 continue
+            kind = parse_line_kind(item.get("kind"))
+            if kind is LineKind.NARRATION:
+                # Narration не имеет говорящего — имя всегда null.
+                item["character_name"] = None
+                continue
+            if kind is None:
+                # Неизвестный kind разберёт classify (UNKNOWN_KIND) и LLM-ремонт;
+                # имя не трогаем, пока неясно, narration это или речь.
+                continue
             name = item.get("character_name")
             if isinstance(name, str):
                 name = name.strip()
@@ -273,7 +356,7 @@ class DialogueRepairService(BaseGenerator):
         valid_names: list[str],
         defects: list[DialogueDefect],
     ) -> list[dict]:
-        """Один батч-запрос ``think=False`` на неизвестные имена и оборванные финалы."""
+        """Один батч-запрос ``think=False``: имена, ``kind`` и оборванные финалы."""
         by_index = {d.line_index: d for d in defects if d.line_index is not None}
         items_to_fix: list[tuple[int, dict, DialogueDefect]] = []
         for index in sorted(by_index):
@@ -294,9 +377,18 @@ class DialogueRepairService(BaseGenerator):
             fix = fixes.get(position)
             if not isinstance(fix, dict):
                 continue
-            name = fix.get("character_name")
-            if isinstance(name, str) and name in valid_names:
-                item["character_name"] = name
+            kind = parse_line_kind(fix.get("kind"))
+            if kind is None:
+                # LLM вернул невалидный kind — оставляем как есть, перевалидация
+                # в repair_lines даст UNKNOWN_KIND (и повод для полного ретрая).
+                continue
+            item["kind"] = kind.value
+            if kind is LineKind.NARRATION:
+                item["character_name"] = None
+            else:
+                name = fix.get("character_name")
+                if isinstance(name, str) and name in valid_names:
+                    item["character_name"] = name
             text = fix.get("text")
             if isinstance(text, str) and text.strip():
                 item["text"] = text
@@ -316,18 +408,27 @@ class DialogueRepairService(BaseGenerator):
                 "do not change the others. Choose character_name strictly from the "
                 "scene participants list. If a line is cut off mid-sentence, complete "
                 "its text so it ends at a natural stopping point.\n"
+                "For each line return its kind as exactly one of \"speech\", "
+                "\"thought\", \"narration\". If the listed kind is missing, misspelled "
+                "or is not one of these three, infer the correct kind from the text: "
+                "narration describes what happens and has no speaker, thought is the "
+                "protagonist's inner monologue, speech is spoken out loud. A narration "
+                "line has no speaker — return character_name as null for it.\n"
                 "For each line return:\n"
                 "1. index - the line's number as given;\n"
-                "2. character_name - the corrected speaker name;\n"
-                "3. text - the corrected text.\n"
+                "2. kind - one of \"speech\", \"thought\", \"narration\";\n"
+                "3. character_name - the corrected speaker name, or null for narration;\n"
+                "4. text - the corrected text.\n"
                 "Answer STRICTLY as JSON matching this schema:\n"
-                '{"fixes": [{"index": integer, "character_name": string, "text": string}]}'
+                '{"fixes": [{"index": integer, "kind": string, '
+                '"character_name": string|null, "text": string}]}'
             ),
         }
         participants = ", ".join(valid_names)
         line_items = [
-            f"{position}. [defect: {defect.kind.value}] "
-            f"{item.get('character_name', '?')}: \"{item.get('text', '')}\""
+            f"{position}. [defect: {defect.kind.value}] kind="
+            f"{_kind_label(item.get('kind'))} "
+            f"{item.get('character_name') or '<narration>'}: \"{item.get('text', '')}\""
             for position, (_, item, defect) in enumerate(items_to_fix, start=1)
         ]
         user_content = (
@@ -358,7 +459,7 @@ class DialogueRepairService(BaseGenerator):
 
     async def repair_tags(
         self,
-        prepared: list[tuple[Character, dict, LineAssets]],
+        prepared: list[tuple[Character | None, dict, LineAssets]],
         resolved: list[ResolvedAssets],
         assets: SceneAssets,
         universe_id: int | None,
@@ -375,7 +476,8 @@ class DialogueRepairService(BaseGenerator):
 
         missing: list[tuple[int, Character, str, str]] = []
         for index, (character, item, line) in enumerate(prepared):
-            if character.is_protagonist:
+            # Narration (character is None) и протагонист не имеют спрайта/эмоции.
+            if character is None or character.is_protagonist:
                 continue
             picked = resolved[index]
             if picked.outfit_asset_key is None or picked.emotion_asset_key is not None:

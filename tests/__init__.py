@@ -4,9 +4,6 @@ from tests.fakes.outbound.codex.client import FakeCodexService
 from tests.fakes.outbound.database.repositories.character_repository import (
     FakeCharacterRepository,
 )
-from tests.fakes.outbound.database.repositories.dialogue_action_repository import (
-    FakeDialogueActionRepository,
-)
 from tests.fakes.outbound.database.repositories.dialogue_line_repository import (
     FakeDialogueLineRepository,
 )
@@ -29,7 +26,6 @@ from tests.fakes.outbound.database.repositories.scene_repository import (
 __all__ = [
     "FakeCharacterRepository",
     "FakeCodexService",
-    "FakeDialogueActionRepository",
     "FakeDialogueLineRepository",
     "FakeGenerationJobRepository",
     "FakeGenerator",
