@@ -3,13 +3,14 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
-from src.core.novels.models import NovelMode
+from src.core.novels.models import NovelMode, PromptVariant
 
 
 class NovelCreateRequest(BaseModel):
     prompt: str
     universe_id: int | None = None
     mode: NovelMode = NovelMode.LINEAR
+    prompt_variant: PromptVariant = PromptVariant.DEFAULT
 
 class NovelResponse(BaseModel):
     id: int
@@ -22,7 +23,7 @@ class NovelResponse(BaseModel):
     tone: str
     universe_id: int | None
     mode: NovelMode
-    prompt_variant: str
+    prompt_variant: PromptVariant
 
 
 class NovelListResponse(BaseModel):

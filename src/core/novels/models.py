@@ -13,10 +13,21 @@ class NovelMode(StrEnum):
     INTERACTIVE = "interactive"
 
 
-# Набор промптов по умолчанию. Дополнительные наборы (например, «nsfw» для
-# новелл со взрослым контентом) добавляются строками в поле novels.prompt_variant
-# и строками таблицы prompts без изменения кода.
-DEFAULT_PROMPT_VARIANT = "default"
+class PromptVariant(StrEnum):
+    """Набор шаблонов промптов, используемых при генерации новеллы.
+
+    Канонический список вариантов хранится здесь: каждому значению должен
+    соответствовать комплект строк таблицы ``prompts`` (по одной на каждый
+    ``PromptKey``). Новый вариант добавляется в этот enum и сидится миграцией
+    в таблицу ``prompts``; поле ``novels.prompt_variant`` валидируется по этому
+    enum на границе входящих запросов (Kafka/HTTP).
+    """
+
+    DEFAULT = "default"
+    NSFW = "nsfw"
+
+
+DEFAULT_PROMPT_VARIANT = PromptVariant.DEFAULT
 
 
 class PromptKey(StrEnum):
@@ -123,9 +134,8 @@ class Novel(LLMGeneratedModel):
     tone: str
     universe_id: int | None = None
     mode: NovelMode = NovelMode.LINEAR
-    # Набор промптов, используемых при генерации (default, nsfw, …). Выбирается
-    # при создании новеллы и прокидывается в каждый генератор.
-    prompt_variant: str = DEFAULT_PROMPT_VARIANT
+
+    prompt_variant: PromptVariant = DEFAULT_PROMPT_VARIANT
 
     _LLM_FIELDS: ClassVar[dict[str, str]] = {
         "title": "short, catchy title",
@@ -141,7 +151,7 @@ class Novel(LLMGeneratedModel):
         *,
         universe_id: int | None = None,
         mode: NovelMode = NovelMode.LINEAR,
-        prompt_variant: str = DEFAULT_PROMPT_VARIANT,
+        prompt_variant: PromptVariant = DEFAULT_PROMPT_VARIANT,
     ) -> "Novel":
         return cls(
             id=None,

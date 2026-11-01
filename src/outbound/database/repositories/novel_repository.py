@@ -6,6 +6,7 @@ from src.core.novels.models import (
     DialogueLine,
     Novel,
     PlayerChoice,
+    PromptVariant,
     Roadmap,
     RoadmapChoice,
     Scene,
@@ -284,7 +285,7 @@ class NovelRepository:
             tone=db_novel.tone,
             universe_id=db_novel.universe_id,
             mode=db_novel.mode,
-            prompt_variant=db_novel.prompt_variant,
+            prompt_variant=PromptVariant(db_novel.prompt_variant),
             created_at=db_novel.created_at,
             updated_at=db_novel.updated_at,
         )
