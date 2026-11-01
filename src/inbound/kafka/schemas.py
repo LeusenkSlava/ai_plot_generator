@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 
-from src.core.novels.models import NovelMode
+from src.core.novels.models import DEFAULT_PROMPT_VARIANT, NovelMode
 
 
 class SceneGenerateRequestedSchema(BaseModel):
@@ -27,3 +27,4 @@ class NovelGenerateRequestedSchema(BaseModel):
     prompt: str = Field(..., min_length=1)
     universe_id: int | None = None
     mode: NovelMode = NovelMode.LINEAR
+    prompt_variant: str = DEFAULT_PROMPT_VARIANT

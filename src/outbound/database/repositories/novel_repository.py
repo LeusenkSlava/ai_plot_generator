@@ -240,6 +240,7 @@ class NovelRepository:
             tone=novel.tone,
             universe_id=novel.universe_id,
             mode=novel.mode,
+            prompt_variant=novel.prompt_variant,
         )
         self._session.add(db_novel)
         await self._session.flush()
@@ -283,6 +284,7 @@ class NovelRepository:
             tone=db_novel.tone,
             universe_id=db_novel.universe_id,
             mode=db_novel.mode,
+            prompt_variant=db_novel.prompt_variant,
             created_at=db_novel.created_at,
             updated_at=db_novel.updated_at,
         )

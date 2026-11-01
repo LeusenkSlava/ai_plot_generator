@@ -2,7 +2,7 @@ import logging
 
 from src.core.novels.exceptions import GenerationError, NovelGenerationFailedError
 from src.core.novels.llm_trace import llm_trace
-from src.core.novels.models import Novel, NovelMode
+from src.core.novels.models import DEFAULT_PROMPT_VARIANT, Novel, NovelMode
 from src.core.novels.services.generation.generators.character import CharacterGenerator
 from src.core.novels.services.generation.generators.dialogue import DialogueGenerator
 from src.core.novels.services.generation.generators.novel import NovelGenerator
@@ -38,6 +38,7 @@ class NovelCompositionService:
         user_promt: str,
         universe_id: int | None = None,
         mode: NovelMode = NovelMode.LINEAR,
+        prompt_variant: str = DEFAULT_PROMPT_VARIANT,
         *,
         step: TransactionFactory,
     ) -> Novel:
@@ -55,6 +56,7 @@ class NovelCompositionService:
                     user_promt,
                     universe_id=universe_id,
                     mode=mode,
+                    prompt_variant=prompt_variant,
                     step=step,
                 )
                 trace.bind(novel.id)

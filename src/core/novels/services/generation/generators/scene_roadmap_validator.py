@@ -3,10 +3,19 @@ from dataclasses import dataclass
 
 from src.core.novels.exceptions import GenerationError
 from src.core.novels.interfaces.generation import GeneratorProtocol
-from src.core.novels.models import Roadmap, Scene
+from src.core.novels.models import (
+    DEFAULT_PROMPT_VARIANT,
+    Prompt,
+    PromptKey,
+    Roadmap,
+    Scene,
+)
+from src.core.novels.services.generation.generators.base import BaseGenerator
+from src.core.novels.services.generation.prompts.catalog import (
+    PromptCatalog,
+    render_messages,
+)
 from src.core.novels.services.generation.prompts.text import RUSSIAN_OUTPUT_NOTE
-
-from .base import BaseGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -33,14 +42,21 @@ class SceneRoadmapValidator(BaseGenerator):
     Проверка смысловая — счёт сцен и порядковые номера в неё не передаются.
     """
 
-    def __init__(self, generator: GeneratorProtocol):
+    def __init__(
+        self,
+        generator: GeneratorProtocol,
+        prompt_catalog: PromptCatalog,
+    ):
         super().__init__(generator)
+        self._prompts = prompt_catalog
 
     async def validate(
         self,
         roadmap: Roadmap,
         scene: Scene,
         story_context: str | None = None,
+        variant: str = DEFAULT_PROMPT_VARIANT,
+        template: Prompt | None = None,
     ) -> SceneRoadmapVerdict:
         # Точное несовпадение места или дня — отказ без вызова LLM: это дешёвая и
         # надёжная проверка, которую не должен пропустить смысловой валидатор.
@@ -68,7 +84,9 @@ class SceneRoadmapValidator(BaseGenerator):
                 f"день сцены {scene.day} не совпадает с днём шага {roadmap.day}",
             )
 
-        prompt = self.__create_prompt(roadmap, scene, story_context)
+        prompt = await self.__create_prompt(
+            template, roadmap, scene, story_context, variant
+        )
         data = await self._generate(prompt, think=False)
         try:
             theme_match = bool(data["theme_match"])
@@ -87,61 +105,37 @@ class SceneRoadmapValidator(BaseGenerator):
             reason=reason,
         )
 
-    @staticmethod
-    def __create_prompt(
+    async def __create_prompt(
+        self,
+        template: Prompt | None,
         roadmap: Roadmap,
         scene: Scene,
         story_context: str | None,
+        variant: str,
     ) -> list[dict]:
-        system_prompt = {
-            "role": "system",
-            "content": (
-                "You are the editor of an interactive visual novel. Check whether the "
-                "generated scene matches the current roadmap step BY MEANING. Judge strictly on three axes:\n"
-                "1. theme_match — theme/event: the scene moves the plot toward the step's event, "
-                "carries the step's conflict, and reaches the step's change, rather than replaying what "
-                "already passed or fulfilling the event of another step;\n"
-                "2. location_match — place: the scene takes place in the location set by the step "
-                "(or logically continues it), not in another location;\n"
-                "3. time_match — time: the scene takes place in the day/stage set by the step "
-                "(or logically follows from the story recap), rather than drifting into another day/stage.\n"
-                "The step's and scene's location and day are set explicitly; if they differ — set false "
-                "on the corresponding axis. If the step's place or time is not set — "
-                "set true on that axis, do not invent a mismatch. Treat only an explicit "
-                "mismatch as a discrepancy.\n"
-                "Answer STRICTLY as JSON matching this schema:\n"
-                """
-                {
-                  "theme_match": boolean,
-                  "location_match": boolean,
-                  "time_match": boolean,
-                  "reason": string
-                }
-                """
-                "\nreason — a short explanation of the discrepancy on the axes where there is one; "
-                "empty string if everything matches."
-            ),
-        }
-        user_content = (
-            f"Roadmap step: {roadmap.title}\n"
-            f"Step event: {roadmap.event}\n"
-            f"Step conflict: {roadmap.conflict}\n"
-            f"Step change: {roadmap.change}\n"
-            f"Step location: {roadmap.location_slug or 'not set'}\n"
-            f"Step time of day: {roadmap.time_of_day or 'not set'}\n"
-            f"Step day: {roadmap.day if roadmap.day is not None else 'not set'}"
-        )
+        if template is None:
+            template = await self._prompts.get(PromptKey.SCENE_VALIDATOR, variant)
+        story_context_block = ""
         if story_context:
-            user_content += (
-                f"\n\nStory so far (day/stage and place of action):\n"
-                f"{story_context}"
+            story_context_block = (
+                "\n\nStory so far (day/stage and place of action):\n" f"{story_context}"
             )
-        user_content += (
-            f"\n\nScene: {scene.title}\n"
-            f"Scene description: {scene.description}\n"
-            f"Scene location: {scene.location_slug or 'not set'}\n"
-            f"Scene time of day: {scene.time_of_day or 'not set'}\n"
-            f"Scene day: {scene.day if scene.day is not None else 'not set'}"
+        return render_messages(
+            template,
+            system_vars={"russian_note": RUSSIAN_OUTPUT_NOTE},
+            user_vars={
+                "step_title": roadmap.title,
+                "step_event": roadmap.event,
+                "step_conflict": roadmap.conflict,
+                "step_change": roadmap.change,
+                "step_location": roadmap.location_slug or "not set",
+                "step_time_of_day": roadmap.time_of_day or "not set",
+                "step_day": roadmap.day if roadmap.day is not None else "not set",
+                "story_context_block": story_context_block,
+                "scene_title": scene.title,
+                "scene_description": scene.description,
+                "scene_location": scene.location_slug or "not set",
+                "scene_time_of_day": scene.time_of_day or "not set",
+                "scene_day": scene.day if scene.day is not None else "not set",
+            },
         )
-        system_prompt["content"] += f"\n{RUSSIAN_OUTPUT_NOTE}"
-        return [system_prompt, {"role": "user", "content": user_content}]

@@ -67,3 +67,12 @@ class RoadmapChoiceNotFoundError(Exception):
     def __init__(self, roadmap_choice_id: int):
         self.roadmap_choice_id = roadmap_choice_id
         super().__init__(f"Roadmap choice {roadmap_choice_id} not found")
+
+
+class PromptNotFoundError(Exception):
+    """Нет ни активной версии в БД, ни встроенного дефолта для (key, variant)."""
+
+    def __init__(self, key: str, variant: str):
+        self.key = key
+        self.variant = variant
+        super().__init__(f"Prompt template {key!r} for variant {variant!r} not found")

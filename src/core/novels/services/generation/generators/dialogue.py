@@ -3,8 +3,11 @@ import logging
 from src.core.novels.exceptions import GenerationError
 from src.core.novels.interfaces.generation import GeneratorProtocol
 from src.core.novels.models import (
+    DEFAULT_PROMPT_VARIANT,
     Character,
     DialogueLine,
+    Prompt,
+    PromptKey,
     Roadmap,
     Scene,
 )
@@ -35,6 +38,10 @@ from src.core.novels.services.generation.prompts.cast import (
     find_protagonist,
     render_cast,
 )
+from src.core.novels.services.generation.prompts.catalog import (
+    PromptCatalog,
+    render_messages,
+)
 from src.core.novels.services.generation.prompts.context import render_place_time
 from src.core.novels.services.generation.prompts.text import RUSSIAN_OUTPUT_NOTE
 from src.core.novels.services.generation.transactions import (
@@ -64,6 +71,7 @@ class DialogueGenerator(BaseGenerator):
         temperature: float | None = None,
         repair: DialogueRepairService | None = None,
         max_validation_retries: int = 3,
+        *, prompt_catalog: PromptCatalog,
     ):
         super().__init__(generator)
         self._novel_service = novel_service
@@ -79,6 +87,7 @@ class DialogueGenerator(BaseGenerator):
             generator=generator, scene_assets=scene_assets
         )
         self._max_validation_retries = max_validation_retries
+        self._prompts = prompt_catalog
 
     async def generate(
         self,
@@ -107,12 +116,19 @@ class DialogueGenerator(BaseGenerator):
 
             characters, all_characters = await self._scene_cast(scene, roadmap.novel_id)
             if not characters:
-                raise GenerationError(f"No characters found for novel {roadmap.novel_id}")
+                raise GenerationError(
+                    f"No characters found for novel {roadmap.novel_id}"
+                )
 
             novel = await self._novel_service.get(roadmap.novel_id)
 
             last_outfits = await self._dialogue_line_service.last_outfit_per_character(
                 roadmap.novel_id
+            )
+
+            template = await self._prompts.get(
+                PromptKey.DIALOGUE,
+                novel.prompt_variant if novel else DEFAULT_PROMPT_VARIANT,
             )
 
         # 2) LLM-фаза: Codex (HTTP) + генерация/ремонт — без транзакции.
@@ -131,6 +147,7 @@ class DialogueGenerator(BaseGenerator):
         )
 
         base_prompt = self.__create_prompt(
+            template,
             scene,
             roadmap,
             characters,
@@ -301,6 +318,7 @@ class DialogueGenerator(BaseGenerator):
 
     def __create_prompt(
         self,
+        template: Prompt,
         scene: Scene,
         roadmap: Roadmap,
         characters: list[Character],
@@ -317,60 +335,20 @@ class DialogueGenerator(BaseGenerator):
         cast = render_cast(all_characters)
         scene_participants = ", ".join(c.name for c in characters)
 
-        system_prompt = {
-            "role": "system",
-            "content": (
-                "You are a screenwriter for interactive visual novels. "
-                "Based on the description of the scene and the list of characters, write the dialogue that takes place in it. "
-                "Write lines only for the characters listed in the «Scene participants» block; "
-                "the other characters of the novel do not appear or speak in this scene. "
-                "Decide the number of lines yourself based on the content of the scene — usually 8 to 16, "
-                "but no fewer than 6. Do not cut the scene off mid-sentence: bring the scene's key conversation "
-                "to a logical point instead of cutting it on someone else's hook line. "
-                "Do not end the scene with a concluding thought or a moral that spells out what was already shown: "
-                "the scene's final line should leave a concrete detail, action, or line, "
-                "not an interpretation; avoid turns of phrase like «кажется», «может», «наверное», «это и называется». "
-                "Do not summarize the climax (a performance, a confession, a decisive act) as an outcome: "
-                "show it beat by beat — at least one crisis moment within the event and its resolution, "
-                "before it concludes. "
-                "Open the scene so it continues from the previous one: if the story picks up in the same place "
-                "and moment, continue from where it left off; if the time or place has changed, ground the reader "
-                "with a short transition (where the protagonist is now, how they got here, or what brought them) "
-                "before the conversation gets going. "
-                + self.__choice_hint(roadmap)
-                + "For each line, specify:\n"
-                "1. character_name - the name of the speaking character, exactly as in the list.\n"
-                "2. text - the text of the line.\n"
-                "3. is_thought - boolean. True if the protagonist's line is their inner thoughts "
-                "(not spoken aloud, shown as an inner monologue); for speech out loud and for "
-                "all other characters it is always false.\n"
-                "Answer STRICTLY as JSON matching this schema:\n"
-                """
-                {
-                  "dialogue_lines": [
-                    {
-                      "character_name": string,
-                      "text": string,
-                      "is_thought": boolean
-                    }
-                  ]
-                }
-                """
-            ),
-        }
+        protagonist_block = ""
         if protagonist:
-            system_prompt["content"] += (
+            protagonist_block = (
                 f"\nThe protagonist is {protagonist.name}. The story is told from their point of view, "
                 "so build the dialogue around their perception, goals, and decisions. "
                 "They have no sprite or emotions on screen: for their lines do not specify an outfit or emotions. "
                 "Their lines can be speech out loud (is_thought=false) or inner thoughts "
                 "(is_thought=true) — use inner thoughts to convey their feelings and motives."
             )
-        # Сначала неизменное для новеллы (персонажи, каталог), потом меняющееся:
-        # так работает кеш префикса у провайдера
-        user_content = f"Novel characters:\n{cast}"
+
+        asset_catalog = ""
+        assets_block = ""
         if assets:
-            system_prompt["content"] += (
+            assets_block = (
                 "\nFor the visual of each line, pick assets ONLY from the catalog, "
                 "specifying slugs and tags exactly as in the catalog, and add these fields to the line object:\n"
                 "- background_base_tag - ONE location tag from the location list that fits the scene's place "
@@ -391,21 +369,31 @@ class DialogueGenerator(BaseGenerator):
                 "A character's outfit does not change between lines and scenes: keep using their current "
                 "outfit_tag until the plot clearly has them change clothes."
             )
-            user_content += f"\n\nAsset catalog:\n{self._scene_assets.assets_catalog(all_characters, assets)}"
+            asset_catalog = "\n\nAsset catalog:\n" + self._scene_assets.assets_catalog(
+                all_characters, assets
+            )
+
+        story_context_block = ""
         if story_context:
-            user_content += (
+            story_context_block = (
                 "\n\nStory so far (do not contradict it; "
                 "characters are dressed as stated there until the plot has them change clothes):\n"
                 f"{story_context}"
             )
+
+        current_outfits_block = ""
         if current_outfits:
-            user_content += f"\n\nCurrent character outfits:\n{current_outfits}"
+            current_outfits_block = f"\n\nCurrent character outfits:\n{current_outfits}"
+
+        previous_scene_block = ""
         if previous_scene is not None:
-            user_content += (
+            previous_scene_block = (
                 "\n\nPrevious scene (where the story left off): "
                 f"{previous_scene.title} — "
                 f"{render_place_time(previous_scene.location_slug, previous_scene.time_of_day, previous_scene.day)}."
             )
+
+        previous_lines_block = ""
         if previous_lines:
             names = {character.id: character.name for character in all_characters}
             recap = "\n".join(
@@ -414,21 +402,39 @@ class DialogueGenerator(BaseGenerator):
                 f"{_short(line.text, PREVIOUS_LINE_MAX_CHARS)}"
                 for line in previous_lines
             )
-            user_content += f"\n\nLast lines of the previous scene (continue the story, do not repeat them):\n{recap}"
+            previous_lines_block = (
+                "\n\nLast lines of the previous scene (continue the story, do not repeat them):\n"
+                f"{recap}"
+            )
+
+        used_phrases_block = ""
         if used_phrases:
-            user_content += (
+            used_phrases_block = (
                 "\n\nPhrases already used in the story (do not repeat them verbatim):\n"
                 + "\n".join(f"- {p}" for p in used_phrases)
             )
-        user_content += (
-            f"\n\nScene: {scene.title}\nScene description: {scene.description}"
-        )
-        user_content += (
-            "\nThis scene takes place at: "
-            f"{render_place_time(scene.location_slug, scene.time_of_day, scene.day)}."
-        )
-        user_content += f"\nScene participants: {scene_participants}"
-        system_prompt["content"] += f"\n{RUSSIAN_OUTPUT_NOTE}"
 
-        user_prompt = {"role": "user", "content": user_content}
-        return [system_prompt, user_prompt]
+        return render_messages(
+            template,
+            system_vars={
+                "choice_hint": self.__choice_hint(roadmap),
+                "protagonist_block": protagonist_block,
+                "assets_block": assets_block,
+                "russian_note": RUSSIAN_OUTPUT_NOTE,
+            },
+            user_vars={
+                "cast": cast,
+                "asset_catalog": asset_catalog,
+                "story_context_block": story_context_block,
+                "current_outfits_block": current_outfits_block,
+                "previous_scene_block": previous_scene_block,
+                "previous_lines_block": previous_lines_block,
+                "used_phrases_block": used_phrases_block,
+                "scene_title": scene.title,
+                "scene_description": scene.description,
+                "place_time": render_place_time(
+                    scene.location_slug, scene.time_of_day, scene.day
+                ),
+                "scene_participants": scene_participants,
+            },
+        )

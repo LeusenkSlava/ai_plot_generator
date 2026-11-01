@@ -5,7 +5,14 @@ from dataclasses import asdict, dataclass, field
 
 from src.core.novels.exceptions import GenerationError
 from src.core.novels.interfaces.generation import GeneratorProtocol
-from src.core.novels.models import Character, DialogueLine, Novel, Scene
+from src.core.novels.models import (
+    Character,
+    DialogueLine,
+    Novel,
+    Prompt,
+    PromptKey,
+    Scene,
+)
 from src.core.novels.services.crud import (
     CharacterService,
     DialogueLineService,
@@ -14,6 +21,10 @@ from src.core.novels.services.crud import (
     SceneService,
 )
 from src.core.novels.services.generation.generators.base import BaseGenerator
+from src.core.novels.services.generation.prompts.catalog import (
+    PromptCatalog,
+    render_messages,
+)
 from src.core.novels.services.generation.prompts.text import RUSSIAN_OUTPUT_NOTE
 from src.core.novels.services.generation.transactions import (
     TransactionFactory,
@@ -276,6 +287,7 @@ class StoryContextGenerator(BaseGenerator):
         character_service: CharacterService,
         dialogue_line_service: DialogueLineService,
         generator: GeneratorProtocol,
+        prompt_catalog: PromptCatalog,
     ):
         super().__init__(generator)
         self._novel_service = novel_service
@@ -283,6 +295,7 @@ class StoryContextGenerator(BaseGenerator):
         self._scene_service = scene_service
         self._character_service = character_service
         self._dialogue_line_service = dialogue_line_service
+        self._prompts = prompt_catalog
 
     async def generate(
         self,
@@ -307,10 +320,13 @@ class StoryContextGenerator(BaseGenerator):
 
             characters = await self._character_service.list_by_novel(novel.id) or []
             lines = await self._dialogue_line_service.list_by_scene(scene.id)
+            template = await self._prompts.get(
+                PromptKey.STORY_CONTEXT, novel.prompt_variant
+            )
 
         # 2) LLM-фаза: без транзакции.
         state = StoryState.load(previous_context)
-        prompt = self.__create_prompt(novel, scene, characters, lines, state)
+        prompt = self.__create_prompt(template, novel, scene, characters, lines, state)
 
         # Один вызов LLM: добавление/удаление фактов + изменившиеся персонажи,
         # склейка фактов в коде. Смысловая дедупликация фактов и LLM-проверка
@@ -339,8 +355,9 @@ class StoryContextGenerator(BaseGenerator):
             await self._scene_service.update_story_context(scene.id, story_context)
         return story_context
 
+    @staticmethod
     def __create_prompt(
-        self,
+        template: Prompt,
         novel: Novel,
         scene: Scene,
         characters: list[Character],
@@ -356,39 +373,7 @@ class StoryContextGenerator(BaseGenerator):
             "the character clearly changed clothes in this scene, otherwise leave an empty string. "
             "Do not rewrite already-specified clothes in other words."
         )
-        system_prompt = {
-            "role": "system",
-            "content": (
-                "You are the editor of an interactive visual novel and maintain the story recap "
-                "from which the following scenes will be generated. "
-                "Based on the previous recap and the new scene's dialogue, return ONLY the changes:\n"
-                "- remove_facts - the numbers of facts from the previous recap that are outdated, "
-                "no longer important to the plot, or absorbed by new ones;\n"
-                "- add_facts - new facts from this scene that matter for the plot going forward "
-                "(events, decisions, secrets, promises, relationships, objects, where characters are), "
-                "each a single short sentence up to 120 characters. A fact counts as a duplicate if it repeats "
-                "the meaning of an existing fact, even in different words — do not add such facts. If a new fact "
-                "absorbs an existing one, add the number of the absorbed one to remove_facts. "
-                f"No more than {MAX_KEY_FACTS} facts should remain after the changes;\n"
-                "- characters - only characters for whom something changed or who appear for the first time: "
-                f"{outfit_instruction} "
-                "state - physical and emotional state, up to 80 characters. Empty string means no changes.\n"
-                "Answer STRICTLY as JSON matching this schema:\n"
-                """
-                {
-                  "remove_facts": [int],
-                  "add_facts": [string],
-                  "characters": [
-                    {
-                      "name": string,
-                      "outfit": string,
-                      "state": string
-                    }
-                  ]
-                }
-                """
-            ),
-        }
+
         cast = "\n".join(
             f"- {c.name} ({c.role}"
             f"{', protagonist' if c.is_protagonist else ''}"
@@ -401,14 +386,21 @@ class StoryContextGenerator(BaseGenerator):
             f"{' (thoughts)' if line.is_thought else ''}: {_short_line(line.text)}"
             for line in lines
         )
-        user_content = (
-            f"Story title: {novel.title}\n"
-            f"Characters:\n{cast}\n\n"
-            f"Previous recap:\n{state.render(numbered=True) or 'none, this is the first scene'}\n\n"
-            f"New scene: {scene.title}\n"
-            f"Scene description: {scene.description}\n"
-            f"Scene dialogue:\n{dialogue}"
+
+        return render_messages(
+            template,
+            system_vars={
+                "outfit_instruction": outfit_instruction,
+                "max_key_facts": MAX_KEY_FACTS,
+                "russian_note": RUSSIAN_OUTPUT_NOTE,
+            },
+            user_vars={
+                "title": novel.title,
+                "cast": cast,
+                "previous_recap": state.render(numbered=True)
+                or "none, this is the first scene",
+                "scene_title": scene.title,
+                "scene_description": scene.description,
+                "dialogue": dialogue,
+            },
         )
-        system_prompt["content"] += f"\n{RUSSIAN_OUTPUT_NOTE}"
-        user_prompt = {"role": "user", "content": user_content}
-        return [system_prompt, user_prompt]

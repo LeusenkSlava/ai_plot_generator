@@ -4,9 +4,13 @@ from src.core.codex.models import CodexCharacter
 from src.core.codex.services import CodexService
 from src.core.novels.exceptions import GenerationError
 from src.core.novels.interfaces.generation import GeneratorProtocol
-from src.core.novels.models import Character, Novel
+from src.core.novels.models import Character, Novel, Prompt, PromptKey
 from src.core.novels.services.crud import CharacterService, NovelService
 from src.core.novels.services.generation.generators.base import BaseGenerator
+from src.core.novels.services.generation.prompts.catalog import (
+    PromptCatalog,
+    render_messages,
+)
 from src.core.novels.services.generation.prompts.context import render_character_catalog
 from src.core.novels.services.generation.prompts.text import RUSSIAN_OUTPUT_NOTE
 from src.core.novels.services.generation.transactions import (
@@ -26,6 +30,7 @@ class CharacterGenerator(BaseGenerator):
         generator: GeneratorProtocol,
         reasoning_effort: str | None = None,
         think: bool = True,
+        *, prompt_catalog: PromptCatalog,
     ):
         super().__init__(generator)
         self._novel_service = novel_service
@@ -33,6 +38,7 @@ class CharacterGenerator(BaseGenerator):
         self._codex_service = codex_service
         self._reasoning_effort = reasoning_effort
         self._think = think
+        self._prompts = prompt_catalog
 
     async def generate(
         self,
@@ -43,8 +49,9 @@ class CharacterGenerator(BaseGenerator):
         # 1) Read-фаза: короткая транзакция, соединение возвращается в пул до LLM.
         async with step():
             novel = await self._novel_service.get(novel_id)
-        if not novel:
-            raise GenerationError(f"Novel with id {novel_id} not found")
+            if not novel:
+                raise GenerationError(f"Novel with id {novel_id} not found")
+            template = await self._prompts.get(PromptKey.CHARACTER, novel.prompt_variant)
 
         # 2) LLM-фаза: Codex (HTTP) и генерация — без транзакции.
         codex_characters: list[CodexCharacter] = []
@@ -57,7 +64,7 @@ class CharacterGenerator(BaseGenerator):
                 raise GenerationError(f"Codex characters request failed: {e}") from e
         codex_by_slug = {c.slug: c for c in codex_characters}
 
-        prompt = self.__create_prompt(novel, codex_characters)
+        prompt = self.__create_prompt(template, novel, codex_characters)
         data = await self._generate(
             prompt, think=self._think, reasoning_effort=self._reasoning_effort
         )
@@ -116,47 +123,14 @@ class CharacterGenerator(BaseGenerator):
         if characters:
             characters[0].is_protagonist = True
 
+    @staticmethod
     def __create_prompt(
-        self, novel: Novel, codex_characters: list[CodexCharacter]
+        template: Prompt, novel: Novel, codex_characters: list[CodexCharacter]
     ) -> list[dict]:
-        system_prompt = {
-            "role": "system",
-            "content": (
-                "You are a screenwriter for interactive visual novels. "
-                "Based on the description of the story and its tone, create a set of characters for the plot. "
-                "Decide the number of characters yourself based on the scale of the story — usually 2 to 6. "
-                "Be sure to include a protagonist (hero/heroine) and at least one antagonist or a significant supporting character. "
-                "For each character, specify:\n"
-                "1. name - the character's name.\n"
-                "2. role - the role in the story (protagonist, antagonist, ally, love interest, etc.).\n"
-                "3. arc - a short description of the character's story arc.\n"
-                "4. voice_notes - notes on the character's manner of speech and personality that will help generate dialogues later.\n"
-                "5. is_protagonist - boolean. true ONLY for the protagonist, "
-                "through whose eyes the player experiences the story; they have no sprite shown, "
-                "and their inner thoughts are available in dialogues. There must be EXACTLY one protagonist.\n"
-                "Answer STRICTLY as JSON matching this schema:\n"
-                """
-                {
-                  "characters": [
-                    {
-                      "name": string,
-                      "role": string,
-                      "arc": string,
-                      "voice_notes": string,
-                      "is_protagonist": boolean
-                    }
-                  ]
-                }
-                """
-            ),
-        }
-        user_content = (
-            f"Title: {novel.title}\n"
-            f"Description: {novel.description}\n"
-            f"Narrative tone: {novel.tone}"
-        )
+        codex_block = ""
+        codex_catalog = ""
         if codex_characters:
-            system_prompt["content"] += (
+            codex_block = (
                 "\nThe story takes place in an existing universe. Take characters ONLY from the knowledge base below: "
                 "convey their name, personality, and manner of speech exactly per their description; do not invent anything. "
                 "For each character add the field codex_slug - the character's slug from the knowledge base, exactly as in the list.\n"
@@ -166,8 +140,17 @@ class CharacterGenerator(BaseGenerator):
                 "protagonist is mentioned, replace their name with the new protagonist's name while keeping the facts — "
                 "including who the character lives with (for example, «живёт в домике с Семёном» → «живёт в домике с Кахевником»)."
             )
-            catalog = render_character_catalog(codex_characters)
-            user_content += f"\nCharacters from the knowledge base:\n{catalog}"
-        system_prompt["content"] += f"\n{RUSSIAN_OUTPUT_NOTE}"
-        user_prompt = {"role": "user", "content": user_content}
-        return [system_prompt, user_prompt]
+            codex_catalog = (
+                "\nCharacters from the knowledge base:\n"
+                + render_character_catalog(codex_characters)
+            )
+        return render_messages(
+            template,
+            system_vars={"codex_block": codex_block, "russian_note": RUSSIAN_OUTPUT_NOTE},
+            user_vars={
+                "title": novel.title,
+                "description": novel.description,
+                "tone": novel.tone,
+                "codex_catalog": codex_catalog,
+            },
+        )

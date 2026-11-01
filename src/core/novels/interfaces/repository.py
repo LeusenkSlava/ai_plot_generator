@@ -5,6 +5,7 @@ from src.core.novels.models import (
     DialogueLine,
     Novel,
     PlayerChoice,
+    Prompt,
     Roadmap,
     RoadmapChoice,
     Scene,
@@ -68,3 +69,11 @@ class PlayerChoiceRepositoryProtocol(Protocol):
         self, roadmap_choice_id: int
     ) -> PlayerChoice | None: ...
     async def delete(self, player_choice_id: int) -> None: ...
+
+
+class PromptRepositoryProtocol(Protocol):
+    """Хранилище версий шаблонов промптов (append-only версионирование)."""
+
+    async def get_active(self, key: str, variant: str) -> Prompt | None: ...
+    async def add(self, prompt: Prompt) -> Prompt: ...
+    async def list_versions(self, key: str, variant: str) -> list[Prompt]: ...

@@ -13,6 +13,29 @@ class NovelMode(StrEnum):
     INTERACTIVE = "interactive"
 
 
+# Набор промптов по умолчанию. Дополнительные наборы (например, «nsfw» для
+# новелл со взрослым контентом) добавляются строками в поле novels.prompt_variant
+# и строками таблицы prompts без изменения кода.
+DEFAULT_PROMPT_VARIANT = "default"
+
+
+class PromptKey(StrEnum):
+    """Канонические ключи шаблонов промптов (по одному на LLM-шаг генерации).
+
+    Ключ — это устойчивое логическое имя шага; генератор запрашивает шаблон по
+    этому ключу и варианту (prompt_variant). Новые шаги/ключи добавляются сюда.
+    """
+
+    NOVEL = "novel"
+    CHARACTER = "character"
+    ROADMAP = "roadmap"
+    SCENE = "scene"
+    DIALOGUE = "dialogue"
+    STORY_CONTEXT = "story_context"
+    BRANCH_ROADMAP = "branch_roadmap"
+    SCENE_VALIDATOR = "scene_validator"
+
+
 @dataclass
 class Character:
     id: int | None
@@ -100,6 +123,9 @@ class Novel(LLMGeneratedModel):
     tone: str
     universe_id: int | None = None
     mode: NovelMode = NovelMode.LINEAR
+    # Набор промптов, используемых при генерации (default, nsfw, …). Выбирается
+    # при создании новеллы и прокидывается в каждый генератор.
+    prompt_variant: str = DEFAULT_PROMPT_VARIANT
 
     _LLM_FIELDS: ClassVar[dict[str, str]] = {
         "title": "short, catchy title",
@@ -115,6 +141,7 @@ class Novel(LLMGeneratedModel):
         *,
         universe_id: int | None = None,
         mode: NovelMode = NovelMode.LINEAR,
+        prompt_variant: str = DEFAULT_PROMPT_VARIANT,
     ) -> "Novel":
         return cls(
             id=None,
@@ -122,6 +149,7 @@ class Novel(LLMGeneratedModel):
             updated_at=None,
             universe_id=universe_id,
             mode=mode,
+            prompt_variant=prompt_variant,
             **cls.llm_values(data),
         )
 
@@ -185,3 +213,25 @@ class PlayerChoice:
     roadmap_choice_id: int
     # Реплика, на которой был показан выбор (для трассировки).
     dialogue_line_id: int | None = None
+
+
+@dataclass
+class Prompt:
+    """Версия шаблона промпта.
+
+    Шаблоны хранятся в БД (таблица ``prompts``) и версионируются append-only:
+    правка добавляет новую версию (``version`` + 1) и деактивирует предыдущую.
+    ``system_template`` и ``user_template`` — тексты с плейсхолдерами вида
+    ``{var}``; рендерит их :class:`PromptCatalog`.
+    """
+
+    id: int | None
+    created_at: datetime | None
+    updated_at: datetime | None
+
+    key: str
+    variant: str
+    version: int
+    system_template: str
+    user_template: str
+    is_active: bool = True

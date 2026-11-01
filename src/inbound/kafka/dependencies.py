@@ -30,6 +30,7 @@ from src.core.novels.services.generation.generators.dialogue_repair import (
 from src.core.novels.services.generation.generators.scene_roadmap_validator import (
     SceneRoadmapValidator,
 )
+from src.core.novels.services.generation.prompts.catalog import PromptCatalog
 from src.core.novels.use_cases import (
     GenerateBranchUseCase,
     GenerateNovelUseCase,
@@ -55,6 +56,7 @@ from src.outbound.database.repositories.novel_repository import (
     RoadmapRepository,
     SceneRepository,
 )
+from src.outbound.database.repositories.prompt_repository import PromptRepository
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +68,7 @@ class NovelRepositories:
     dialogue_line: DialogueLineRepository
     roadmap_choice: RoadmapChoiceRepository
     player_choice: PlayerChoiceRepository
+    prompt: PromptRepository
 
 
 def build_novel_repositories(session: AsyncSession) -> NovelRepositories:
@@ -77,6 +80,7 @@ def build_novel_repositories(session: AsyncSession) -> NovelRepositories:
         dialogue_line=DialogueLineRepository(session),
         roadmap_choice=RoadmapChoiceRepository(session),
         player_choice=PlayerChoiceRepository(session),
+        prompt=PromptRepository(session),
     )
 
 
@@ -118,8 +122,11 @@ class NovelGenerators:
 
 def build_novel_generators(
     services: NovelDomainServices,
+    prompt_repository: PromptRepository,
 ) -> NovelGenerators:
     client = build_deepseek_client()
+
+    prompt_catalog = PromptCatalog(repository=prompt_repository)
 
     # «Творческие» шаги (замысел новеллы, роадмап и сцены) — на более мощной
     # pro-модели, остальные структурированные шаги — на дефолтной flash-модели.
@@ -160,6 +167,7 @@ def build_novel_generators(
             codex_service=codex_service,
             generator=novel_generator,
             reasoning_effort=settings.deepseek.NOVEL_REASONING_EFFORT,
+            prompt_catalog=prompt_catalog,
         ),
         character=CharacterGenerator(
             novel_service=services.novel,
@@ -168,6 +176,7 @@ def build_novel_generators(
             generator=generator,
             reasoning_effort=settings.deepseek.CHARACTER_REASONING_EFFORT,
             think=settings.deepseek.CHARACTER_THINK,
+            prompt_catalog=prompt_catalog,
         ),
         roadmap=RoadmapGenerator(
             novel_service=services.novel,
@@ -178,6 +187,7 @@ def build_novel_generators(
             roadmap_choice_service=services.roadmap_choice,
             reasoning_effort=settings.deepseek.ROADMAP_REASONING_EFFORT,
             think=settings.deepseek.ROADMAP_THINK,
+            prompt_catalog=prompt_catalog,
         ),
         scene=SceneGenerator(
             novel_service=services.novel,
@@ -187,8 +197,11 @@ def build_novel_generators(
             generator=scene_generator,
             # Валидатор сцены — дешёвая смысловая сверка со структурированным
             # JSON-ответом; оставляем на flash, чтобы не жечь pro на проверки.
-            validator=SceneRoadmapValidator(generator=generator),
+            validator=SceneRoadmapValidator(
+                generator=generator, prompt_catalog=prompt_catalog
+            ),
             max_validation_retries=settings.deepseek.SCENE_VALIDATION_RETRIES,
+            prompt_catalog=prompt_catalog,
         ),
         dialogue=DialogueGenerator(
             novel_service=services.novel,
@@ -203,6 +216,7 @@ def build_novel_generators(
             temperature=settings.deepseek.DIALOGUE_TEMPERATURE,
             repair=repair,
             max_validation_retries=settings.deepseek.DIALOGUE_VALIDATION_RETRIES,
+            prompt_catalog=prompt_catalog,
         ),
         story_context=StoryContextGenerator(
             novel_service=services.novel,
@@ -211,6 +225,7 @@ def build_novel_generators(
             character_service=services.character,
             dialogue_line_service=services.dialogue_line,
             generator=generator,
+            prompt_catalog=prompt_catalog,
         ),
         branch_roadmap=BranchRoadmapGenerator(
             novel_service=services.novel,
@@ -221,6 +236,7 @@ def build_novel_generators(
             generator=roadmap_generator,
             reasoning_effort=settings.deepseek.ROADMAP_REASONING_EFFORT,
             think=settings.deepseek.ROADMAP_THINK,
+            prompt_catalog=prompt_catalog,
         ),
     )
 
@@ -230,7 +246,7 @@ def _build_repos_services_generators(
 ) -> tuple[NovelRepositories, NovelDomainServices, NovelGenerators]:
     repos = build_novel_repositories(session)
     services = build_novel_domain_services(repos)
-    generators = build_novel_generators(services)
+    generators = build_novel_generators(services, repos.prompt)
     return repos, services, generators
 
 

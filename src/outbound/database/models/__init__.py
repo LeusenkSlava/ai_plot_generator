@@ -8,6 +8,7 @@ from .novels import (
     RoadmapModel,
     SceneModel,
 )
+from .prompts import PromptModel
 
 __all__ = (
     "CharacterModel",
@@ -15,6 +16,7 @@ __all__ = (
     "GenerationJobModel",
     "NovelModel",
     "PlayerChoiceModel",
+    "PromptModel",
     "RoadmapChoiceModel",
     "RoadmapModel",
     "SceneModel",

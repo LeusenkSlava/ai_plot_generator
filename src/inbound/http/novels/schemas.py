@@ -22,6 +22,7 @@ class NovelResponse(BaseModel):
     tone: str
     universe_id: int | None
     mode: NovelMode
+    prompt_variant: str
 
 
 class NovelListResponse(BaseModel):

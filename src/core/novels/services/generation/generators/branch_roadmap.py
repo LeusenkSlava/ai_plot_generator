@@ -4,7 +4,14 @@ from src.core.codex.models import BackgroundTags
 from src.core.codex.services import CodexService
 from src.core.novels.exceptions import GenerationError
 from src.core.novels.interfaces.generation import GeneratorProtocol
-from src.core.novels.models import Character, Novel, Roadmap, RoadmapChoice
+from src.core.novels.models import (
+    Character,
+    Novel,
+    Prompt,
+    PromptKey,
+    Roadmap,
+    RoadmapChoice,
+)
 from src.core.novels.services.crud import (
     CharacterService,
     NovelService,
@@ -15,6 +22,10 @@ from src.core.novels.services.generation.generators.base import BaseGenerator
 from src.core.novels.services.generation.prompts.cast import (
     find_protagonist,
     render_cast,
+)
+from src.core.novels.services.generation.prompts.catalog import (
+    PromptCatalog,
+    render_messages,
 )
 from src.core.novels.services.generation.prompts.context import (
     render_place_time_catalog,
@@ -50,6 +61,7 @@ class BranchRoadmapGenerator(BaseGenerator):
         generator: GeneratorProtocol,
         reasoning_effort: str | None = None,
         think: bool = True,
+        *, prompt_catalog: PromptCatalog,
     ):
         super().__init__(generator)
         self._novel_service = novel_service
@@ -59,6 +71,7 @@ class BranchRoadmapGenerator(BaseGenerator):
         self._codex_service = codex_service
         self._reasoning_effort = reasoning_effort
         self._think = think
+        self._prompts = prompt_catalog
 
     async def generate(
         self,
@@ -83,6 +96,9 @@ class BranchRoadmapGenerator(BaseGenerator):
                 raise GenerationError(f"Novel {fork.novel_id} not found")
             characters = await self._character_service.list_by_novel(novel.id) or []
             roadmaps = await self._roadmap_service.list_by_novel(novel.id) or []
+            template = await self._prompts.get(
+                PromptKey.BRANCH_ROADMAP, novel.prompt_variant
+            )
 
         branch_id = max((r.branch_id for r in roadmaps), default=0) + 1
         start_depth = fork.depth + 1
@@ -90,7 +106,7 @@ class BranchRoadmapGenerator(BaseGenerator):
         # 2) LLM-фаза.
         background_tags = await self.__load_background_tags(novel)
         prompt = self.__create_prompt(
-            novel, characters, choice, fork, background_tags
+            template, novel, characters, choice, fork, background_tags
         )
         data = await self._generate(
             prompt, think=self._think, reasoning_effort=self._reasoning_effort
@@ -172,74 +188,43 @@ class BranchRoadmapGenerator(BaseGenerator):
 
     @staticmethod
     def __create_prompt(
+        template: Prompt,
         novel: Novel,
         characters: list[Character],
         choice: RoadmapChoice,
         fork: Roadmap,
         background_tags: BackgroundTags | None,
     ) -> list[dict]:
-        system_prompt = {
-            "role": "system",
-            "content": (
-                "You are a screenwriter for interactive visual novels. "
-                "Create the roadmap of an ALTERNATIVE branch of the story: the protagonist "
-                "made a different choice, and now the story diverges and leads to its own ending. "
-                "The branch is linear — no branches and no player choices. "
-                "Decide the number of steps yourself — usually 3 to 6; keep it tight, each step "
-                "moves the plot toward this branch's own resolution. "
-                "For each step, specify:\n"
-                "1. title - a short title.\n"
-                "2. event - ONE completed event/beat of this step (fits into 1-2 scenes).\n"
-                "3. conflict - what makes this event hard for the protagonist.\n"
-                "4. change - what changes for the protagonist by the end of the step.\n"
-                "5. scenes_count - 1 or 2 (the final step may have 2 or 3).\n"
-                "6. location_slug - ONLY from the location list (empty string if no list).\n"
-                "7. time_of_day - ONLY from the time-of-day list (empty string if no list).\n"
-                "8. day - integer from the branch's start day, non-decreasing.\n"
-                "Build event/conflict/change only on the characters from the list below; do not "
-                "introduce characters who are not in the list. Do not contradict the story so far. "
-                "The branch ends with a real resolution, not a cliffhanger cut.\n"
-                "Answer STRICTLY as JSON matching this schema:\n"
-                """
-                {
-                  "roadmap": [
-                    {
-                      "title": string,
-                      "event": string,
-                      "conflict": string,
-                      "change": string,
-                      "scenes_count": integer,
-                      "location_slug": string,
-                      "time_of_day": string,
-                      "day": integer
-                    }
-                  ]
-                }
-                """
-            ),
-        }
-        user_content = (
-            f"Story title: {novel.title}\n"
-            f"Narrative tone: {novel.tone}\n"
-            f"Story description: {novel.description}\n"
-            f"\nChoice point step: {fork.title}\n"
-            f'Choice stakes: {fork.choice_stakes or "the protagonist\'s decision"}\n'
-            f"Chosen branch: {choice.text}\n"
-            f"Branch direction: {choice.branch_direction or choice.text}\n"
-            f"Start day: {fork.day or 1}"
-        )
+        place_time_catalog = ""
         if background_tags:
-            user_content += (
+            place_time_catalog = (
                 "\n\nPlace and time catalog (choose only from here):\n"
                 + render_place_time_catalog(background_tags)
             )
+
+        characters_block = ""
         if characters:
-            user_content += f"\nCharacters:\n{render_cast(characters)}"
+            characters_block = f"\nCharacters:\n{render_cast(characters)}"
             protagonist = find_protagonist(characters)
             if protagonist:
-                user_content += (
+                characters_block += (
                     f"\n\nProtagonist: {protagonist.name}. Build the branch around their "
                     "goals, decisions, and relationships."
                 )
-        system_prompt["content"] += f"\n{RUSSIAN_OUTPUT_NOTE}"
-        return [system_prompt, {"role": "user", "content": user_content}]
+
+        return render_messages(
+            template,
+            system_vars={"russian_note": RUSSIAN_OUTPUT_NOTE},
+            user_vars={
+                "title": novel.title,
+                "tone": novel.tone,
+                "description": novel.description,
+                "fork_title": fork.title,
+                "choice_stakes": fork.choice_stakes or "the protagonist's decision",
+                "choice_text": choice.text,
+                "branch_direction": choice.branch_direction or choice.text,
+                "start_day": fork.day or 1,
+                "place_time_catalog": place_time_catalog,
+                "characters_block": characters_block,
+            },
+        )

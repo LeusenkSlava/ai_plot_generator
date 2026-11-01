@@ -2,7 +2,7 @@ from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from src.core.novels.models import NovelMode
+from src.core.novels.models import DEFAULT_PROMPT_VARIANT, NovelMode
 from src.outbound.database.models.base_model import BaseModel
 from src.outbound.database.utils import pg_enum
 
@@ -100,6 +100,12 @@ class NovelModel(BaseModel):
         nullable=False,
         default=NovelMode.LINEAR,
         server_default=NovelMode.LINEAR.value,
+    )
+    prompt_variant: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        default=DEFAULT_PROMPT_VARIANT,
+        server_default=DEFAULT_PROMPT_VARIANT,
     )
 
     characters: Mapped[list["CharacterModel"]] = relationship(

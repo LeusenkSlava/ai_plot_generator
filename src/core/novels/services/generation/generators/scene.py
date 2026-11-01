@@ -2,7 +2,7 @@ import logging
 
 from src.core.novels.exceptions import GenerationError
 from src.core.novels.interfaces.generation import GeneratorProtocol
-from src.core.novels.models import Character, Novel, Roadmap, Scene
+from src.core.novels.models import Character, Novel, Prompt, PromptKey, Roadmap, Scene
 from src.core.novels.services.crud import (
     CharacterService,
     NovelService,
@@ -16,6 +16,10 @@ from src.core.novels.services.generation.generators.scene_roadmap_validator impo
 from src.core.novels.services.generation.prompts.cast import (
     find_protagonist,
     render_cast,
+)
+from src.core.novels.services.generation.prompts.catalog import (
+    PromptCatalog,
+    render_messages,
 )
 from src.core.novels.services.generation.prompts.context import render_place_time
 from src.core.novels.services.generation.prompts.text import (
@@ -40,6 +44,7 @@ class SceneGenerator(BaseGenerator):
         generator: GeneratorProtocol,
         validator: SceneRoadmapValidator,
         max_validation_retries: int = 3,
+        *, prompt_catalog: PromptCatalog,
     ):
         super().__init__(generator)
         self._novel_service = novel_service
@@ -48,6 +53,7 @@ class SceneGenerator(BaseGenerator):
         self._character_service = character_service
         self._validator = validator
         self._max_validation_retries = max_validation_retries
+        self._prompts = prompt_catalog
 
     async def generate(
         self,
@@ -96,8 +102,14 @@ class SceneGenerator(BaseGenerator):
             is_leaf = not any(r.parent_roadmap_id == roadmap.id for r in roadmaps)
             is_final_for_novel = is_final_for_roadmap and is_leaf
 
+            scene_template = await self._prompts.get(PromptKey.SCENE, novel.prompt_variant)
+            validator_template = await self._prompts.get(
+                PromptKey.SCENE_VALIDATOR, novel.prompt_variant
+            )
+
         # 2) LLM-фаза: сборка промпта и ретрай-цикл — без транзакции.
         prompt = self.__create_prompt(
+            scene_template,
             novel,
             roadmap,
             characters,
@@ -139,6 +151,8 @@ class SceneGenerator(BaseGenerator):
                     roadmap=roadmap,
                     scene=scene,
                     story_context=story_context,
+                    variant=novel.prompt_variant,
+                    template=validator_template,
                 )
             except GenerationError as e:
                 # Не удалось собрать участников (неизвестное имя) или сверка упала
@@ -313,8 +327,9 @@ class SceneGenerator(BaseGenerator):
             reason or "не указана",
         )
 
+    @staticmethod
     def __create_prompt(
-        self,
+        template: Prompt,
         novel: Novel,
         roadmap: Roadmap,
         characters: list[Character],
@@ -323,83 +338,53 @@ class SceneGenerator(BaseGenerator):
         story_context: str | None,
     ) -> list[dict]:
         scenes_count = max(roadmap.scenes_count, step_position)
-        system_prompt = {
-            "role": "system",
-            "content": (
-                "You are a screenwriter for interactive visual novels. "
-                "Based on the description of the story and the current roadmap step, create the next scene of this step. "
-                "It should continue the previous scenes without repeating them "
-                "and move the plot toward the step's event — carry its conflict and reach its change. "
-                "The scene should unfold the step's event and establish the place and situation of the action, "
-                "but not retell the dialogues themselves. Put the step's conflict into the description as a "
-                "concrete crisis or obstacle (what makes the event hard), not just its outcome. Specify:\n"
-                "1. title - a short title for the scene.\n"
-                "2. description - a description of the place, time, situation, and conflict of the scene, "
-                "from which the characters' dialogues will then be generated: "
-                "2-4 sentences, no more than 400 characters, no atmospheric details.\n"
-                "3. characters - the names of the characters who are in this scene by place and time "
-                "(exactly as in the character list). Include only those who belong here; "
-                "do not include a character who does not belong here (for example, someone who never leaves "
-                "their own location — in a scene elsewhere). Including the protagonist is optional: "
-                "they are always present and are added automatically.\n"
-                "4. location_slug - the slug of the scene's location: the same as the roadmap step's (empty string "
-                "if the step does not set one).\n"
-                "5. time_of_day - the slug of the scene's time of day (empty string if the step does not set one); "
-                "it may change within the step if it is the same day.\n"
-                "6. day - the story day number (integer from 1): the same as the roadmap step's.\n"
-                "If the scene starts later in time or in a different place than the previous one, "
-                "note this gap directly in description.\n"
-                "Answer STRICTLY as JSON matching this schema:\n"
-                """
-                {
-                  "title": string,
-                  "description": string,
-                  "characters": [string],
-                  "location_slug": string,
-                  "time_of_day": string,
-                  "day": integer
-                }
-                """
-            ),
-        }
-        # Сначала неизменное для новеллы, потом меняющееся: так работает кеш префикса у провайдера
-        user_content = f"Story title: {novel.title}\n" f"Narrative tone: {novel.tone}"
+
+        characters_block = ""
         if characters:
-            user_content += f"\nCharacters:\n{render_cast(characters)}"
+            characters_block = f"\nCharacters:\n{render_cast(characters)}"
             protagonist = find_protagonist(characters)
             if protagonist:
-                user_content += (
+                characters_block += (
                     f"\n\nProtagonist: {protagonist.name} — the protagonist. "
                     "The scene should be presented through their perception: their goals, feelings, and choices."
                 )
-        user_content += (
-            f"\n\nStep place and time: "
-            f"{render_place_time(roadmap.location_slug, roadmap.time_of_day, roadmap.day)}."
-        )
-        # Блок шага — в голову (стабилен внутри шага, попадает в кэш), а не после
-        # динамического изложения и предыдущих сцен.
-        user_content += (
-            f"\n\nRoadmap step: {roadmap.title}\n"
-            f"Step event: {roadmap.event}\n"
-            f"Step conflict: {roadmap.conflict}\n"
-            f"Step change: {roadmap.change}\n"
-            f"Scene number within the step: {step_position} of {scenes_count}"
-        )
+
+        story_context_block = ""
         if story_context:
-            user_content += (
+            story_context_block = (
                 "\n\nStory so far (the scene must not contradict it; "
                 f"do not change characters' outfits without a plot reason):\n{story_context}"
             )
+
+        previous_scenes_block = ""
         if previous_scenes:
             # Что произошло, уже есть в изложении — полностью нужна только последняя сцена для стыка
             *earlier, last = previous_scenes
             story_so_far = "".join(f"- {scene.title}\n" for scene in earlier)
             story_so_far += f"- {last.title}: {last.description}"
-            user_content += f"\n\nPrevious scenes:\n{story_so_far}"
-            user_content += (
+            previous_scenes_block = (
+                f"\n\nPrevious scenes:\n{story_so_far}"
                 f"\nEnd of the previous scene: "
                 f"{render_place_time(last.location_slug, last.time_of_day, last.day)}."
             )
-        system_prompt["content"] += f"\n{RUSSIAN_OUTPUT_NOTE}"
-        user_prompt = {"role": "user", "content": user_content}
-        return [system_prompt, user_prompt]
+
+        return render_messages(
+            template,
+            system_vars={"russian_note": RUSSIAN_OUTPUT_NOTE},
+            user_vars={
+                "title": novel.title,
+                "tone": novel.tone,
+                "characters_block": characters_block,
+                "step_place_time": render_place_time(
+                    roadmap.location_slug, roadmap.time_of_day, roadmap.day
+                ),
+                "step_title": roadmap.title,
+                "step_event": roadmap.event,
+                "step_conflict": roadmap.conflict,
+                "step_change": roadmap.change,
+                "step_position": step_position,
+                "scenes_count": scenes_count,
+                "story_context_block": story_context_block,
+                "previous_scenes_block": previous_scenes_block,
+            },
+        )
