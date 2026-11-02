@@ -70,6 +70,7 @@ class RoadmapGenerator(BaseGenerator):
         self,
         novel_id: int,
         *,
+        user_prompt: str,
         step: TransactionFactory = noop_step,
     ) -> list[Roadmap]:
         # 1) Read-фаза: короткая транзакция.
@@ -83,7 +84,9 @@ class RoadmapGenerator(BaseGenerator):
         # 2) LLM-фаза: Codex (HTTP) и генерация — без транзакции.
         background_tags = await self.__load_background_tags(novel)
 
-        prompt = self.__create_prompt(template, novel, characters, background_tags)
+        prompt = self.__create_prompt(
+            template, novel, characters, background_tags, user_prompt
+        )
         data = await self._generate(
             prompt, think=self._think, reasoning_effort=self._reasoning_effort
         )
@@ -315,6 +318,7 @@ class RoadmapGenerator(BaseGenerator):
         novel: Novel,
         characters: list[Character],
         background_tags: BackgroundTags | None,
+        user_prompt: str,
     ) -> list[dict]:
         interactive = novel.mode == NovelMode.INTERACTIVE
 
@@ -352,6 +356,7 @@ class RoadmapGenerator(BaseGenerator):
                 "russian_note": RUSSIAN_OUTPUT_NOTE,
             },
             user_vars={
+                "user_prompt": user_prompt,
                 "title": novel.title,
                 "description": novel.description,
                 "tone": novel.tone,

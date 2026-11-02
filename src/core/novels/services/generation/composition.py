@@ -63,7 +63,9 @@ class NovelCompositionService:
 
                 await self._character_generator.generate(novel.id, step=step)
 
-                roadmap = await self._roadmap_generator.generate(novel.id, step=step)
+                roadmap = await self._roadmap_generator.generate(
+                    novel.id, user_prompt=user_promt, step=step
+                )
 
                 # Первая сцена — отдельный признак, не разовая настройка.
                 with llm_trace("scene_1", novel_id=novel.id):
