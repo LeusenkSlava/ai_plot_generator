@@ -18,7 +18,7 @@
 Режимы:
     # 1. По сцене из БД (вариант промптов берётся из новеллы)
     python scripts/regen_dialogue.py --scene-id 91
-    python scripts/regen_dialogue.py --scene-id 91 --variant nsfw
+    python scripts/regen_dialogue.py --scene-id 91 --variant nsfw_high
     python scripts/regen_dialogue.py --scene-id 91 --mock scripts/mocks/dialogue.json
     python scripts/regen_dialogue.py --scene-id 91 --render-only   # только показать промпт
 

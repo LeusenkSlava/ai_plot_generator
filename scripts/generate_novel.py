@@ -22,7 +22,7 @@
     python3 scripts/generate_novel.py "Новелла про то, как герой учится писать промпты"
     python3 scripts/generate_novel.py "Детектив в киберпанке" --universe-id 1 --out novel.txt
     python3 scripts/generate_novel.py "Романтика в поезде" --mode interactive
-    python3 scripts/generate_novel.py "18+ история" --prompt-variant nsfw
+    python3 scripts/generate_novel.py "18+ история" --prompt-variant nsfw_high
     python3 scripts/generate_novel.py --novel-id 42 --out novel.txt
 
 Зависимости — только стандартная библиотека Python.
@@ -149,9 +149,12 @@ def main() -> int:
     )
     parser.add_argument(
         "--prompt-variant",
-        choices=("default", "nsfw"),
+        choices=("default", "nsfw_low", "nsfw_medium", "nsfw_high", "nsfw"),
         default=None,
-        help="Вариант набора промптов (default | nsfw); по умолчанию default",
+        help=(
+            "Вариант набора промптов (default | nsfw_low | nsfw_medium | nsfw_high | nsfw); "
+            "nsfw — устаревший вариант с тем же содержимым, что nsfw_high, по умолчанию default"
+        ),
     )
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL, help=f"Адрес My Choice API (по умолчанию {DEFAULT_BASE_URL})")
     parser.add_argument("--out", default=None, help="Сохранить текст новеллы в файл")
