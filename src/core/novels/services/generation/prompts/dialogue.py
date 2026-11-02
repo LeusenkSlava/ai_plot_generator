@@ -51,6 +51,10 @@ class DialoguePromptContext:
     current_outfits: str
     used_phrases: list[str]
     previous_scene: Scene | None
+    # Позиция сцены внутри шага роадмапа (1..N). Нужна, чтобы откровенный шаг
+    # раскладывался по сценам (завязка → акт), а не обрывался на пороге.
+    scene_position: int = 0
+    scenes_count: int = 0
 
 
 def _choice_hint(roadmap: Roadmap) -> str:
@@ -167,6 +171,22 @@ class DialoguePromptBuilder:
                 + "\n".join(f"- {p}" for p in ctx.used_phrases)
             )
 
+        # Шаг роадмапа: диалог пишется не только по описанию сцены, но и по биту
+        # шага. Без этого интимный шаг, чьё описание оборвалось на подходе,
+        # превращался в разговор без акта (см. миграцию nsfw_high v2).
+        step_block = "\n".join(
+            (
+                f"Roadmap step: {ctx.roadmap.title}",
+                f"Step event: {ctx.roadmap.event}",
+                f"Step conflict: {ctx.roadmap.conflict}",
+                f"Step change: {ctx.roadmap.change}",
+            )
+        )
+        if ctx.scenes_count:
+            step_block += (
+                f"\nScene {ctx.scene_position} of {ctx.scenes_count} within the step."
+            )
+
         return render_messages(
             template,
             system_vars={
@@ -183,6 +203,7 @@ class DialoguePromptBuilder:
                 "previous_scene_block": previous_scene_block,
                 "previous_lines_block": previous_lines_block,
                 "used_phrases_block": used_phrases_block,
+                "step_block": step_block,
                 "scene_title": ctx.scene.title,
                 "scene_description": ctx.scene.description,
                 "place_time": render_place_time(

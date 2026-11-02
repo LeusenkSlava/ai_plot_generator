@@ -136,6 +136,8 @@ class DialogueGenerator(BaseGenerator):
                 current_outfits=current_outfits,
                 used_phrases=used_phrases,
                 previous_scene=previous_scene,
+                scene_position=read.scene_position,
+                scenes_count=read.scenes_count,
             ),
         )
 

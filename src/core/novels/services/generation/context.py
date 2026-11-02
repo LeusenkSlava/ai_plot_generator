@@ -52,6 +52,9 @@ class DialogueReadPhase:
     all_characters: list[Character]  # весь каст
     last_outfits: dict[int, str]
     template: Prompt
+    # Позиция сцены внутри шага и запланированное число сцен шага (1..N).
+    scene_position: int = 0
+    scenes_count: int = 0
 
 
 class DialogueContextLoader:
@@ -113,6 +116,20 @@ class DialogueContextLoader:
             novel.prompt_variant if novel else DEFAULT_PROMPT_VARIANT,
         )
 
+        # Позиция сцены внутри шага: по ней диалог понимает, завязка это или
+        # сцена, которая обязана дойти до смены шага (акт, развязка). Считаем
+        # так же, как next_scene_position: только валидные сцены (needs_review
+        # не закрывают шаг и не должны сдвигать нумерацию).
+        roadmap_scenes = await self._scene_service.list_by_roadmap(roadmap.id) or []
+        ordered = sorted(
+            (s for s in roadmap_scenes if not s.needs_review), key=lambda s: s.order
+        )
+        scene_position = next(
+            (position for position, s in enumerate(ordered, start=1) if s.id == scene.id),
+            0,
+        )
+        scenes_count = roadmap.scenes_count or len(ordered)
+
         return DialogueReadPhase(
             scene=scene,
             roadmap=roadmap,
@@ -121,6 +138,8 @@ class DialogueContextLoader:
             all_characters=all_characters,
             last_outfits=last_outfits,
             template=template,
+            scene_position=scene_position,
+            scenes_count=scenes_count,
         )
 
     async def load_context(
@@ -186,6 +205,8 @@ class DialogueContextLoader:
                 [c.name for c in read.all_characters],
             ),
             previous_scene=state.last_scenes[-1] if state.last_scenes else None,
+            scene_position=read.scene_position,
+            scenes_count=read.scenes_count,
         )
 
     async def _scene_cast(
