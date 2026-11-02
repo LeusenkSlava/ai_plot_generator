@@ -2,18 +2,14 @@ import httpx
 import pytest
 import respx
 
-from src.core.codex.models import TagType
+from src.core.codex.models import TagKind
 from src.outbound.codex.codex_client import HttpCodexClient
 from tests.unit.outbound.codex.constants import BASE_URL
 from tests.unit.outbound.codex.factories import (
-    emotion_domain,
-    emotion_payload,
-    emotion_tag_payload,
     outfit_catalog_payload,
-    outfit_domain,
-    outfit_style_tag_payload,
+    outfit_emotion_domain,
+    outfit_emotion_payload,
     outfit_with_emotions_domain,
-    tag_domain,
 )
 
 
@@ -43,29 +39,17 @@ class TestOutfitsWithEmotionsBatch:
                 json={
                     "201": [
                         outfit_catalog_payload(
-                            id=301,
-                            sprite_id=201,
-                            slug="coat",
+                            outfit_tag="coat",
                             name="Пальто",
-                            asset_key="outfits/coat.png",
-                            tags=[
-                                outfit_style_tag_payload(
-                                    id=20, slug="coat", name="Пальто"
-                                )
-                            ],
                             emotions=[
-                                emotion_payload(
-                                    id=400,
-                                    sprite_id=201,
-                                    slug="happy",
-                                    name="Happy",
-                                    asset_key="emotions/happy.png",
-                                    tags=[
-                                        emotion_tag_payload(
-                                            id=30, slug="happy", name="Happy"
-                                        )
-                                    ],
-                                )
+                                outfit_emotion_payload(
+                                    slug="happy", name="Happy", kind=TagKind.BASE
+                                ),
+                                outfit_emotion_payload(
+                                    slug="tears",
+                                    name="Со слезами",
+                                    kind=TagKind.MODIFIER,
+                                ),
                             ],
                         )
                     ],
@@ -80,37 +64,15 @@ class TestOutfitsWithEmotionsBatch:
         assert result == {
             201: [
                 outfit_with_emotions_domain(
-                    outfit=outfit_domain(
-                        id=301,
-                        sprite_id=201,
-                        slug="coat",
-                        name="Пальто",
-                        asset_key="outfits/coat.png",
-                        tags=[
-                            tag_domain(
-                                id=20,
-                                type=TagType.OUTFIT_STYLE,
-                                slug="coat",
-                                name="Пальто",
-                            )
-                        ],
-                    ),
+                    outfit_tag="coat",
+                    name="Пальто",
                     emotions=[
-                        emotion_domain(
-                            id=400,
-                            sprite_id=201,
-                            slug="happy",
-                            name="Happy",
-                            asset_key="emotions/happy.png",
-                            tags=[
-                                tag_domain(
-                                    id=30,
-                                    type=TagType.EMOTION,
-                                    slug="happy",
-                                    name="Happy",
-                                )
-                            ],
-                        )
+                        outfit_emotion_domain(
+                            slug="happy", name="Happy", kind=TagKind.BASE
+                        ),
+                        outfit_emotion_domain(
+                            slug="tears", name="Со слезами", kind=TagKind.MODIFIER
+                        ),
                     ],
                 )
             ],
@@ -133,7 +95,7 @@ class TestBatchCache:
         route = respx.post(url).mock(
             return_value=httpx.Response(
                 200,
-                json={"201": [outfit_catalog_payload(id=301, sprite_id=201)]},
+                json={"201": [outfit_catalog_payload(outfit_tag="casual", name="Casual")]},
             )
         )
         sut = HttpCodexClient(client=_http_client, cache=cache)
@@ -142,11 +104,7 @@ class TestBatchCache:
         second = await sut.get_outfits_with_emotions_batch([201])
 
         expected = {
-            201: [
-                outfit_with_emotions_domain(
-                    outfit=outfit_domain(id=301, sprite_id=201)
-                )
-            ]
+            201: [outfit_with_emotions_domain(outfit_tag="casual", name="Casual")]
         }
         assert first == second == expected
         assert route.call_count == 1

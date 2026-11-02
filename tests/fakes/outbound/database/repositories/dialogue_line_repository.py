@@ -10,7 +10,7 @@ class FakeDialogueLineRepository:
         self._last_outfits: dict[int, str] = {}
 
     def set_last_outfits(self, mapping: dict[int, str]) -> None:
-        """Явно задать последний наряд по персонажу (character_id -> asset_key)."""
+        """Явно задать последний наряд по персонажу (character_id -> outfit_tag)."""
         self._last_outfits = dict(mapping)
 
     async def add(self, dialog_line: DialogueLine) -> DialogueLine:
@@ -40,8 +40,8 @@ class FakeDialogueLineRepository:
             return dict(self._last_outfits)
         result: dict[int, str] = {}
         for line in self._items.values():
-            if line.novel_id == novel_id and line.outfit_asset_key is not None:
-                result[line.character_id] = line.outfit_asset_key
+            if line.novel_id == novel_id and line.outfit_tag is not None:
+                result[line.character_id] = line.outfit_tag
         return result
 
     async def delete(self, dialog_line_id: int) -> None:

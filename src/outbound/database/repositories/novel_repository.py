@@ -307,6 +307,7 @@ class DialogueLineRepository:
             background_asset_key=dialog_line.background_asset_key,
             sound_asset_key=dialog_line.sound_asset_key,
             sprite_asset_key=dialog_line.sprite_asset_key,
+            outfit_tag=dialog_line.outfit_tag,
             outfit_asset_key=dialog_line.outfit_asset_key,
             emotion_asset_key=dialog_line.emotion_asset_key,
         )
@@ -348,10 +349,10 @@ class DialogueLineRepository:
 
     async def last_outfit_per_character(self, novel_id: int) -> dict[int, str]:
         stmt = (
-            select(DialogueLineModel.character_id, DialogueLineModel.outfit_asset_key)
+            select(DialogueLineModel.character_id, DialogueLineModel.outfit_tag)
             .where(
                 DialogueLineModel.novel_id == novel_id,
-                DialogueLineModel.outfit_asset_key.isnot(None),
+                DialogueLineModel.outfit_tag.isnot(None),
                 DialogueLineModel.character_id.isnot(None),
             )
             .distinct(DialogueLineModel.character_id)
@@ -384,6 +385,7 @@ class DialogueLineRepository:
             background_asset_key=db_dialog_line.background_asset_key,
             sound_asset_key=db_dialog_line.sound_asset_key,
             sprite_asset_key=db_dialog_line.sprite_asset_key,
+            outfit_tag=db_dialog_line.outfit_tag,
             outfit_asset_key=db_dialog_line.outfit_asset_key,
             emotion_asset_key=db_dialog_line.emotion_asset_key,
         )

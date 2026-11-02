@@ -50,6 +50,7 @@ class DialogueLineResponse(BaseModel):
     background_asset_key: str | None
     sound_asset_key: str | None
     sprite_asset_key: str | None
+    outfit_tag: str | None
     outfit_asset_key: str | None
     emotion_asset_key: str | None
 

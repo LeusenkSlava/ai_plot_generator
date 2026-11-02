@@ -58,41 +58,21 @@ class Background:
 
 
 @dataclass
-class Sprite:
-    id: int
-    character_id: int
-    slug: str
-    description: str
-    asset_key: str
-    tags: list[Tag] = field(default_factory=list)
+class OutfitEmotion:
+    """Тег эмоции, доступной для одежды с данным style-тегом."""
 
-
-@dataclass
-class Emotion:
-    id: int
-    sprite_id: int
     slug: str
     name: str
-    asset_key: str
-    tags: list[Tag] = field(default_factory=list)
-
-
-@dataclass
-class Outfit:
-    id: int
-    sprite_id: int
-    slug: str
-    name: str
-    asset_key: str
-    tags: list[Tag] = field(default_factory=list)
+    kind: TagKind | None = None
 
 
 @dataclass
 class OutfitWithEmotions:
-    """Наряд вместе с доступными на нём эмоциями (элемент каталога персонажа)."""
+    """Style-тег одежды вместе с доступными на нём emotion-тегами."""
 
-    outfit: Outfit
-    emotions: list[Emotion] = field(default_factory=list)
+    outfit_tag: str
+    name: str
+    emotions: list[OutfitEmotion] = field(default_factory=list)
 
 
 @dataclass
@@ -110,15 +90,6 @@ class EmotionTags:
 
     base: list[Tag] = field(default_factory=list)
     modifiers: list[Tag] = field(default_factory=list)
-
-
-@dataclass
-class EmotionMatchItem:
-    """Запрос подбора эмоции для одного персонажа."""
-
-    character_id: int
-    tags: list[str]
-    sprite_id: int | None = None
 
 
 @dataclass

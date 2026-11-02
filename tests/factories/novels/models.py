@@ -166,6 +166,7 @@ def dialogue_line_domain(
     background_asset_key: str | None = None,
     sound_asset_key: str | None = None,
     sprite_asset_key: str | None = None,
+    outfit_tag: str | None = None,
     outfit_asset_key: str | None = None,
     emotion_asset_key: str | None = None,
 ) -> DialogueLine:
@@ -183,6 +184,7 @@ def dialogue_line_domain(
         background_asset_key=background_asset_key,
         sound_asset_key=sound_asset_key,
         sprite_asset_key=sprite_asset_key,
+        outfit_tag=outfit_tag,
         outfit_asset_key=outfit_asset_key,
         emotion_asset_key=emotion_asset_key,
     )

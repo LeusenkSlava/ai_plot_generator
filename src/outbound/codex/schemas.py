@@ -39,35 +39,20 @@ class BackgroundSchema(BaseModel):
     tags: list[TagSchema] = []
 
 
-class SpriteSchema(BaseModel):
-    id: int
-    character_id: int
-    slug: str
-    description: str
-    asset_key: str
-    tags: list[TagSchema] = []
+class OutfitEmotionSchema(BaseModel):
+    """Тег эмоции, доступной для одежды с данным style-тегом."""
 
-
-class EmotionSchema(BaseModel):
-    id: int
-    sprite_id: int
     slug: str
     name: str
-    asset_key: str
-    tags: list[TagSchema] = []
+    kind: TagKind | None = None
 
 
-class OutfitSchema(BaseModel):
-    id: int
-    sprite_id: int
-    slug: str
+class OutfitCatalogSchema(BaseModel):
+    """Style-тег одежды с доступными для него emotion-тегами (элемент каталога)."""
+
+    outfit_tag: str
     name: str
-    asset_key: str
-    tags: list[TagSchema] = []
-
-
-class OutfitCatalogSchema(OutfitSchema):
-    emotions: list[EmotionSchema] = []
+    emotions: list[OutfitEmotionSchema] = []
 
 
 class VisualMatchRequest(BaseModel):

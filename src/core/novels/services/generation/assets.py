@@ -13,11 +13,9 @@ from dataclasses import dataclass, field
 from src.core.codex.exceptions import CodexUnavailableError
 from src.core.codex.models import (
     BackgroundTags,
-    Emotion,
+    OutfitEmotion,
     OutfitWithEmotions,
-    Tag,
     TagKind,
-    TagType,
 )
 from src.core.codex.services import CodexService
 from src.core.novels.exceptions import GenerationError
@@ -33,18 +31,17 @@ def _short(text: str, limit: int = SPRITE_DESCRIPTION_MAX_CHARS) -> str:
     return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
 
 
-def _emotion_tags_by_kind(emotions: list[Emotion]) -> tuple[list[Tag], list[Tag]]:
-    """Разделяет emotion-теги наряда на base и modifiers."""
-    base: list[Tag] = []
-    modifiers: list[Tag] = []
+def _split_emotions(
+    emotions: list[OutfitEmotion],
+) -> tuple[list[OutfitEmotion], list[OutfitEmotion]]:
+    """Делит emotion-теги наряда на base и modifiers по их kind."""
+    base: list[OutfitEmotion] = []
+    modifiers: list[OutfitEmotion] = []
     for emotion in emotions:
-        for tag in emotion.tags:
-            if tag.type != TagType.EMOTION:
-                continue
-            if tag.kind == TagKind.MODIFIER:
-                modifiers.append(tag)
-            else:
-                base.append(tag)
+        if emotion.kind == TagKind.MODIFIER:
+            modifiers.append(emotion)
+        else:
+            base.append(emotion)
     return base, modifiers
 
 
@@ -54,7 +51,7 @@ class SceneAssets:
 
     # теги фонов вселенной (базовые локации + уточнения); фон подбирается по ним
     background_tags: BackgroundTags | None = None
-    # codex_character_id -> наряды с доступными на них эмоциями
+    # codex_character_id -> style-теги одежды с доступными эмоциями
     outfits: dict[int, list[OutfitWithEmotions]] = field(default_factory=dict)
 
     def __bool__(self) -> bool:
@@ -78,6 +75,7 @@ class ResolvedAssets:
     background_asset_key: str | None = None
     sound_asset_key: str | None = None
     sprite_asset_key: str | None = None
+    outfit_tag: str | None = None
     outfit_asset_key: str | None = None
     emotion_asset_key: str | None = None
 
@@ -146,23 +144,19 @@ class SceneAssetService:
     ) -> tuple[list[str], list[str]]:
         """Валидные emotion-слаги наряда персонажа: (base, modifiers).
 
-        Слаги объединяются по всем сущностям-нарядам с одинаковым style-тегом —
-        именно так тег одежды резолвится в match_visual.
+        Codex уже отдаёт по одной группе на style-тег с объединёнными эмоциями
+        всех спрайтов, поэтому здесь достаточно найти группу по тегу.
         """
         if codex_character_id is None:
             return [], []
         base: set[str] = set()
         modifiers: set[str] = set()
         for entry in assets.outfits.get(codex_character_id, []):
-            entry_tag = next(
-                (t.slug for t in entry.outfit.tags if t.type == TagType.OUTFIT_STYLE),
-                None,
-            )
-            if entry_tag != outfit_tag:
+            if entry.outfit_tag != outfit_tag:
                 continue
-            base_tags, modifier_tags = _emotion_tags_by_kind(entry.emotions)
-            base.update(t.slug for t in base_tags)
-            modifiers.update(t.slug for t in modifier_tags)
+            base_tags, modifier_tags = _split_emotions(entry.emotions)
+            base.update(e.slug for e in base_tags)
+            modifiers.update(e.slug for e in modifier_tags)
         return sorted(base), sorted(modifiers)
 
     async def match_emotion_asset(
@@ -240,6 +234,8 @@ class SceneAssetService:
                     result.sprite_asset_key = visual.sprite_asset_key
                     result.outfit_asset_key = visual.outfit_asset_key
                     result.emotion_asset_key = visual.emotion_asset_key
+                    if visual.outfit_asset_key:
+                        result.outfit_tag = line.outfit_tag
                 else:
                     logger.warning(
                         f"SceneAssetService: no visual matched for "
@@ -257,26 +253,22 @@ class SceneAssetService:
     def current_outfits(
         characters: list[Character], assets: SceneAssets, last_outfits: dict[int, str]
     ) -> str:
-        """Резолв последнего наряда каждого персонажа: asset_key -> тег одежды."""
+        """Резолв последнего наряда каждого персонажа: character -> style-тег."""
         lines: list[str] = []
 
         for c in characters:
-            asset_key = last_outfits.get(c.id)
-            if not asset_key:
+            outfit_tag = last_outfits.get(c.id)
+            if not outfit_tag:
                 continue
-            for entry in assets.outfits.get(c.codex_character_id, []):
-                if entry.outfit.asset_key == asset_key:
-                    tag = next(
-                        (
-                            t.slug
-                            for t in entry.outfit.tags
-                            if t.type == TagType.OUTFIT_STYLE
-                        ),
-                        None,
-                    )
-                    if tag:
-                        lines.append(f"- {c.name}: outfit_tag {tag} ({entry.outfit.name})")
-                    break
+            name = next(
+                (
+                    entry.name
+                    for entry in assets.outfits.get(c.codex_character_id, [])
+                    if entry.outfit_tag == outfit_tag
+                ),
+                outfit_tag,
+            )
+            lines.append(f"- {c.name}: outfit_tag {outfit_tag} ({name})")
         return "\n".join(lines)
 
     @staticmethod
@@ -302,26 +294,23 @@ class SceneAssetService:
             outfits = assets.outfits.get(character.codex_character_id)
             if not outfits:
                 continue
+            # Codex уже отдаёт по одной группе на style-тег, объединив эмоции всех
+            # спрайтов. LLM адресует наряд только тегом, поэтому каталог рендерится
+            # как есть — без клиентской группировки.
             lines.append(
                 f"Outfits of character {character.name} (outfit_tag → emotions):"
             )
             for entry in outfits:
-                outfit = entry.outfit
-                outfit_tag = next(
-                    (
-                        t.slug
-                        for t in outfit.tags
-                        if t.type == TagType.OUTFIT_STYLE
-                    ),
-                    None,
-                )
-                base_tags, modifier_tags = _emotion_tags_by_kind(entry.emotions)
-                base = ", ".join(f"{t.slug}={t.name}" for t in base_tags) or "-"
-                modifiers = (
-                    ", ".join(f"{t.slug}={t.name}" for t in modifier_tags) or "-"
-                )
-                label = f"{outfit_tag} ({outfit.name})" if outfit_tag else outfit.name
-                lines.append(f"- {label}:")
+                base_tags, modifier_tags = _split_emotions(entry.emotions)
+                base = ", ".join(
+                    f"{e.slug}={e.name}"
+                    for e in sorted(base_tags, key=lambda e: e.slug)
+                ) or "-"
+                modifiers = ", ".join(
+                    f"{e.slug}={e.name}"
+                    for e in sorted(modifier_tags, key=lambda e: e.slug)
+                ) or "-"
+                lines.append(f"- {entry.outfit_tag} ({entry.name}):")
                 lines.append(f"    base (emotion_base_tag): {base}")
                 lines.append(f"    modifiers (emotion_modifier_tags): {modifiers}")
         return "\n".join(lines)

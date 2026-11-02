@@ -1,79 +1,50 @@
-from src.core.codex.models import Emotion, Outfit, OutfitWithEmotions, Tag
-from src.outbound.codex.schemas import (
-    EmotionSchema,
-    OutfitCatalogSchema,
-    OutfitSchema,
-    TagSchema,
-)
+from src.core.codex.models import OutfitEmotion, OutfitWithEmotions, TagKind
+from src.outbound.codex.schemas import OutfitCatalogSchema, OutfitEmotionSchema
 
 
-def outfit_payload(
+def outfit_emotion_payload(
     *,
-    id: int = 1,
-    sprite_id: int = 1,
-    slug: str = "casual",
-    name: str = "Casual",
-    asset_key: str = "outfits/casual.png",
-    tags: list[dict] | None = None,
+    slug: str = "happy",
+    name: str = "Happy",
+    kind: TagKind | None = TagKind.BASE,
 ) -> dict:
-    return OutfitSchema(
-        id=id,
-        sprite_id=sprite_id,
-        slug=slug,
-        name=name,
-        asset_key=asset_key,
-        tags=[TagSchema(**t) for t in (tags or [])],
-    ).model_dump(mode="json")
+    """Тег эмоции внутри сгруппированного элемента каталога (payload)."""
+    return OutfitEmotionSchema(slug=slug, name=name, kind=kind).model_dump(mode="json")
 
 
-def outfit_domain(
+def outfit_emotion_domain(
     *,
-    id: int = 1,
-    sprite_id: int = 1,
-    slug: str = "casual",
-    name: str = "Casual",
-    asset_key: str = "outfits/casual.png",
-    tags: list[Tag] | None = None,
-) -> Outfit:
-    return Outfit(
-        id=id,
-        sprite_id=sprite_id,
-        slug=slug,
-        name=name,
-        asset_key=asset_key,
-        tags=tags or [],
-    )
+    slug: str = "happy",
+    name: str = "Happy",
+    kind: TagKind | None = TagKind.BASE,
+) -> OutfitEmotion:
+    """Тег эмоции внутри сгруппированного элемента каталога (домен)."""
+    return OutfitEmotion(slug=slug, name=name, kind=kind)
 
 
 def outfit_catalog_payload(
     *,
-    id: int = 1,
-    sprite_id: int = 1,
-    slug: str = "casual",
+    outfit_tag: str = "casual",
     name: str = "Casual",
-    asset_key: str = "outfits/casual.png",
-    tags: list[dict] | None = None,
     emotions: list[dict] | None = None,
 ) -> dict:
-    """Элемент каталога нарядов: наряд + вложенные эмоции (payload)."""
+    """Сгруппированный элемент каталога нарядов: style-тег + эмоции (payload)."""
     return OutfitCatalogSchema(
-        id=id,
-        sprite_id=sprite_id,
-        slug=slug,
+        outfit_tag=outfit_tag,
         name=name,
-        asset_key=asset_key,
-        tags=[TagSchema(**t) for t in (tags or [])],
-        emotions=[EmotionSchema(**e) for e in (emotions or [])],
+        emotions=[OutfitEmotionSchema(**e) for e in (emotions or [])],
     ).model_dump(mode="json")
 
 
 def outfit_with_emotions_domain(
     *,
-    outfit: Outfit | None = None,
-    emotions: list[Emotion] | None = None,
+    outfit_tag: str = "casual",
+    name: str = "Casual",
+    emotions: list[OutfitEmotion] | None = None,
 ) -> OutfitWithEmotions:
-    """Наряд с эмоциями в доменном виде."""
+    """Сгруппированный элемент каталога нарядов в доменном виде."""
     return OutfitWithEmotions(
-        outfit=outfit or outfit_domain(),
+        outfit_tag=outfit_tag,
+        name=name,
         emotions=list(emotions) if emotions is not None else [],
     )

@@ -42,10 +42,8 @@ from tests.fakes.outbound.database.repositories.scene_repository import (
     FakeSceneRepository,
 )
 from tests.unit.outbound.codex.factories import (
-    emotion_domain,
-    outfit_domain,
+    outfit_emotion_domain,
     outfit_with_emotions_domain,
-    sprite_domain,
 )
 
 # ---------------------------------------------------------------------------
@@ -57,20 +55,6 @@ BOB_CODEX_ID = 20
 
 
 def seed_codex(codex: FakeCodexService) -> None:
-    angry = Tag(
-        id=1, type=TagType.EMOTION, slug="angry", name="Злость", kind=TagKind.BASE
-    )
-    soft = Tag(
-        id=2, type=TagType.EMOTION, slug="soft", name="Мягко", kind=TagKind.MODIFIER
-    )
-    calm = Tag(
-        id=3, type=TagType.EMOTION, slug="calm", name="Спокойствие", kind=TagKind.BASE
-    )
-    red_dress = Tag(
-        id=4, type=TagType.OUTFIT_STYLE, slug="red-dress", name="Красное платье"
-    )
-    armor = Tag(id=5, type=TagType.OUTFIT_STYLE, slug="armor", name="Доспех")
-
     codex.add_backgrounds(
         1,
         [
@@ -92,18 +76,14 @@ def seed_codex(codex: FakeCodexService) -> None:
         ALICE_CODEX_ID,
         [
             outfit_with_emotions_domain(
-                outfit=outfit_domain(
-                    id=200, sprite_id=100, slug="red-dress", name="Красное платье",
-                    asset_key="outfits/red-dress.png", tags=[red_dress],
-                ),
+                outfit_tag="red-dress",
+                name="Красное платье",
                 emotions=[
-                    emotion_domain(
-                        id=300, sprite_id=100, slug="angry", name="Злость",
-                        asset_key="emotions/alice-angry.png", tags=[angry],
+                    outfit_emotion_domain(
+                        slug="angry", name="Злость", kind=TagKind.BASE
                     ),
-                    emotion_domain(
-                        id=301, sprite_id=100, slug="soft", name="Мягко",
-                        asset_key="emotions/alice-soft.png", tags=[soft],
+                    outfit_emotion_domain(
+                        slug="soft", name="Мягко", kind=TagKind.MODIFIER
                     ),
                 ],
             )
@@ -113,27 +93,15 @@ def seed_codex(codex: FakeCodexService) -> None:
         BOB_CODEX_ID,
         [
             outfit_with_emotions_domain(
-                outfit=outfit_domain(
-                    id=201, sprite_id=101, slug="armor", name="Доспех",
-                    asset_key="outfits/armor.png", tags=[armor],
-                ),
+                outfit_tag="armor",
+                name="Доспех",
                 emotions=[
-                    emotion_domain(
-                        id=302, sprite_id=101, slug="calm", name="Спокойствие",
-                        asset_key="emotions/bob-calm.png", tags=[calm],
+                    outfit_emotion_domain(
+                        slug="calm", name="Спокойствие", kind=TagKind.BASE
                     ),
                 ],
             )
         ],
-    )
-
-    alice_sprite = sprite_domain(
-        id=100, character_id=ALICE_CODEX_ID, slug="alice-base",
-        description="Алиса", asset_key="sprites/alice.png",
-    )
-    bob_sprite = sprite_domain(
-        id=101, character_id=BOB_CODEX_ID, slug="bob-armor",
-        description="Боб", asset_key="sprites/bob.png",
     )
 
     codex.set_match_visual(
@@ -141,7 +109,7 @@ def seed_codex(codex: FakeCodexService) -> None:
         "red-dress",
         ["angry", "soft"],
         VisualMatch(
-            sprite_asset_key=alice_sprite.asset_key,
+            sprite_asset_key="sprites/alice.png",
             outfit_asset_key="outfits/red-dress.png",
             emotion_asset_key="emotions/alice-angry.png",
         ),
@@ -151,7 +119,7 @@ def seed_codex(codex: FakeCodexService) -> None:
         "armor",
         ["calm"],
         VisualMatch(
-            sprite_asset_key=bob_sprite.asset_key,
+            sprite_asset_key="sprites/bob.png",
             outfit_asset_key="outfits/armor.png",
             emotion_asset_key="emotions/bob-calm.png",
         ),
@@ -440,6 +408,7 @@ class TestGenerateWithUniverse:
         assert alice_line.sound_asset_key == "sounds/forest.ogg"
         assert alice_line.sprite_asset_key == "sprites/alice.png"
         assert alice_line.outfit_asset_key == "outfits/red-dress.png"
+        assert alice_line.outfit_tag == "red-dress"
         assert alice_line.emotion_asset_key == "emotions/alice-angry.png"
         assert alice_line.is_final_for_scene is False
 
@@ -448,6 +417,7 @@ class TestGenerateWithUniverse:
         assert bob_line.sound_asset_key == "sounds/forest.ogg"
         assert bob_line.sprite_asset_key == "sprites/bob.png"
         assert bob_line.outfit_asset_key == "outfits/armor.png"
+        assert bob_line.outfit_tag == "armor"
         assert bob_line.emotion_asset_key == "emotions/bob-calm.png"
         assert bob_line.is_final_for_scene is True
 
@@ -551,9 +521,7 @@ class TestPromptContext:
     async def test_current_outfits_in_prompt(
         self, sut, generator, dialogue_line_repository, world
     ):
-        dialogue_line_repository.set_last_outfits(
-            {world.alice.id: "outfits/red-dress.png"}
-        )
+        dialogue_line_repository.set_last_outfits({world.alice.id: "red-dress"})
 
         await sut.generate(scene_id=world.scene.id)
 

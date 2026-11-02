@@ -1,13 +1,3 @@
-"""Сборка промпта диалога — единственный источник его текста.
-
-``DialoguePromptBuilder`` — чистая сборка сообщений LLM из шаблона и контекста
-сцены: без БД и без вызова LLM. Раньше эта логика жила приватным
-``DialogueGenerator.__create_prompt``, а скрипт ``regen_dialogue.py`` зеркалил её
-вручную — два источника неизбежно разъезжались. Теперь прод и инструмент
-собирают промпт одним кодом: генератор передаёт ``DialoguePromptContext``,
-заполненный из БД/Codex, инструмент — тот же контекст с ``assets=None``.
-"""
-
 from dataclasses import dataclass
 
 from src.core.novels.models import (
@@ -19,8 +9,8 @@ from src.core.novels.models import (
     Scene,
 )
 from src.core.novels.services.generation.assets import (
-    SceneAssetService,
     SceneAssets,
+    SceneAssetService,
     _short,
 )
 from src.core.novels.services.generation.prompts.cast import render_cast
@@ -30,14 +20,33 @@ from src.core.novels.services.generation.prompts.text import RUSSIAN_OUTPUT_NOTE
 
 PREVIOUS_LINE_MAX_CHARS = 300
 
+OUTFIT_POLICY = (
+    "An outfit is chosen for the scene, not fixed for the whole novel. Within one scene a "
+    "character keeps one outfit_tag unless the narration explicitly shows them changing clothes; "
+    "a new outfit must be introduced by narration, never appear suddenly on a later line. "
+    "Between scenes the outfit may change when the scene's place, time or event gives a concrete "
+    "reason: a beach, bathhouse or pool (especially a night party or a swim), sport, a cold night "
+    "outside, sleep, a formal event. If the scene description does not name the clothes, choose "
+    "them from the place, time and event rather than from the previous scene. Do not carry the "
+    "previous outfit by inertia: at a night beach party the natural outfit is swimwear, not the "
+    "camp uniform. If you change an outfit relative to «Current character outfits», the first "
+    "narration beat with that character must show the new clothes — what they are wearing and, "
+    "if it matters, how they changed; a dialogue line alone cannot carry a change of clothes. "
+    "If the scene gives no such reason, keep the current outfit_tag."
+)
+
+CURRENT_OUTFITS_HEADER = (
+    "\n\nCurrent character outfits (from their last appearance; this scene may start with other "
+    "clothes — if you change them, show it in narration):\n"
+)
+
 
 @dataclass(frozen=True, slots=True)
 class DialoguePromptContext:
-    """Всё, что нужно для сборки промпта диалога, кроме самого шаблона.
+    """Контекст для сборки промпта диалога (всё, кроме шаблона).
 
-    ``assets``/``current_outfits`` заполняет прод (после Codex-фазы); инструмент
-    передаёт ``assets=None`` и ``current_outfits=""`` — текст он тестирует без
-    визуала, asset-блоки при этом становятся пустыми.
+    ``assets``/``current_outfits`` заполняет прод; инструмент тестирует текст
+    без визуала и передаёт ``assets=None``, ``current_outfits=""``.
     """
 
     scene: Scene
@@ -51,17 +60,15 @@ class DialoguePromptContext:
     current_outfits: str
     used_phrases: list[str]
     previous_scene: Scene | None
-    # Позиция сцены внутри шага роадмапа (1..N). Нужна, чтобы откровенный шаг
-    # раскладывался по сценам (завязка → акт), а не обрывался на пороге.
+    # Позиция сцены в шаге роадмапа (1..N), чтобы шаг раскладывался по сценам целиком.
     scene_position: int = 0
     scenes_count: int = 0
 
 
 def _choice_hint(roadmap: Roadmap) -> str:
-    """Подсказка о выборе: шаг с target_choice должен подвести диалог к решению.
+    """Подсказка о выборе: подводит диалог к решению.
 
-    Сами варианты выбора не пишем — они уже зафиксированы на шаге роадмапа
-    (roadmap_choices) и раздаются через playback.
+    Варианты не пишем — они уже есть в roadmap_choices и раздаются через playback.
     """
     if not roadmap.target_choice:
         return "The story is linear: do not offer the player any choices.\n"
@@ -78,8 +85,7 @@ class DialoguePromptBuilder:
     """Собирает сообщения LLM из шаблона диалога и контекста сцены."""
 
     def __init__(self, scene_assets: SceneAssetService | None = None):
-        # Нужен только для ``assets_catalog``, который рендерится при ``ctx.assets``.
-        # Инструмент, тестирующий текст без визуала, передаёт ``None`` (и ``assets=None``).
+        # Только для assets_catalog; без визуала инструмент передаёт None.
         self._scene_assets = scene_assets
 
     def build(self, template: Prompt, ctx: DialoguePromptContext) -> list[dict]:
@@ -121,14 +127,12 @@ class DialoguePromptBuilder:
                 "For the protagonist's lines (no sprite), set null for outfit_tag and "
                 "emotion_base_tag and an empty list [] for emotion_modifier_tags; "
                 "specify the background (background_base_tag and background_modifier_tags) as for other lines.\n"
-                "For narration lines (kind=\"narration\"), there is no sprite, outfit, or emotion: "
+                'For narration lines (kind="narration"), there is no sprite, outfit, or emotion: '
                 "set null for outfit_tag and emotion_base_tag and an empty list [] for "
                 "emotion_modifier_tags; specify only the background "
                 "(background_base_tag and background_modifier_tags) as for other lines.\n"
                 "If there is no suitable asset, set null; for emotion_modifier_tags set an empty list [].\n"
-                "A character's outfit does not change between lines and scenes: keep using their current "
-                "outfit_tag until the plot clearly has them change clothes."
-            )
+            ) + OUTFIT_POLICY
             asset_catalog = "\n\nAsset catalog:\n" + self._scene_assets.assets_catalog(
                 ctx.all_characters, ctx.assets
             )
@@ -137,13 +141,13 @@ class DialoguePromptBuilder:
         if ctx.story_context:
             story_context_block = (
                 "\n\nStory so far (do not contradict it; "
-                "characters are dressed as stated there until the plot has them change clothes):\n"
+                "characters keep the clothes described there unless this scene shows them changing):\n"
                 f"{ctx.story_context}"
             )
 
         current_outfits_block = ""
         if ctx.current_outfits:
-            current_outfits_block = f"\n\nCurrent character outfits:\n{ctx.current_outfits}"
+            current_outfits_block = CURRENT_OUTFITS_HEADER + ctx.current_outfits
 
         previous_scene_block = ""
         if ctx.previous_scene is not None:
@@ -171,9 +175,7 @@ class DialoguePromptBuilder:
                 + "\n".join(f"- {p}" for p in ctx.used_phrases)
             )
 
-        # Шаг роадмапа: диалог пишется не только по описанию сцены, но и по биту
-        # шага. Без этого интимный шаг, чьё описание оборвалось на подходе,
-        # превращался в разговор без акта (см. миграцию nsfw_high v2).
+        # Диалог пишется и по биту шага роадмапа; иначе шаг обрывался на подходе (см. nsfw_high v2).
         step_block = "\n".join(
             (
                 f"Roadmap step: {ctx.roadmap.title}",
@@ -221,8 +223,7 @@ class DialoguePromptBuilder:
     ) -> str:
         """Одна прошлая реплика для блока «последние реплики».
 
-        ``narration_label`` задаётся вызывающим: в промпте диалога — ``[narration]``,
-        в изложении истории — ``[описание]``.
+        ``narration_label`` — ``[narration]`` в диалоге, ``[описание]`` в изложении.
         """
         text = _short(line.text, PREVIOUS_LINE_MAX_CHARS)
         if line.kind is LineKind.NARRATION:

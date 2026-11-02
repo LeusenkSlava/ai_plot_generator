@@ -12,8 +12,7 @@ from src.core.codex.models import (
     BackgroundMatchItem,
     BackgroundTags,
     CodexCharacter,
-    Emotion,
-    Outfit,
+    OutfitEmotion,
     OutfitWithEmotions,
     Tag,
     Universe,
@@ -54,13 +53,6 @@ def _batch_cache_key(resource: str, ids: list[int]) -> str:
 
 def _tags(tags: list[TagSchema]) -> list[Tag]:
     return [Tag(**t.model_dump()) for t in tags]
-
-
-def _outfit_from_catalog(entry: OutfitCatalogSchema) -> Outfit:
-    """Превращает элемент каталога нарядов в доменный Outfit (без вложенных эмоций)."""
-    data = entry.model_dump(exclude={"tags", "emotions"})
-    data["tags"] = _tags(entry.tags)
-    return Outfit(**data)
 
 
 class HttpCodexClient:
@@ -280,8 +272,11 @@ class HttpCodexClient:
         return {
             character_id: [
                 OutfitWithEmotions(
-                    outfit=_outfit_from_catalog(entry),
-                    emotions=[self._to_domain(e, Emotion) for e in entry.emotions],
+                    outfit_tag=entry.outfit_tag,
+                    name=entry.name,
+                    emotions=[
+                        OutfitEmotion(**e.model_dump()) for e in entry.emotions
+                    ],
                 )
                 for entry in entries
             ]
