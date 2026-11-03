@@ -1,13 +1,13 @@
-"""Add dialogue_lines.outfit_tag — style-тег наряда для блока «Current outfits»
+"""Добавлено dialogue_lines.outfit_tag — style-тег наряда для блока «Current outfits»
 
 Revision ID: c9d0e1f2a3b4
 Revises: b8c9d0e1f2a3
 Create Date: 2026-11-02 21:00:00.000000
 
-Каталог нарядов теперь приходит из Codex уже сгруппированным по style-тегу, и
-обратный маппинг «asset_key картинки -> style-тег» больше не нужен. Вместо него
-генератор сохраняет style-тег (`outfit_tag`), который он и так передал в
-``match_visual``, — из него собирается блок «Current character outfits».
+Каталог нарядов из Codex приходит сгруппированным по style-тегу; обратный маппинг
+«asset_key картинки -> style-тег» больше не нужен. Генератор сохраняет style-тег
+(``outfit_tag``), который передаёт в ``match_visual``; из него собирается блок
+«Current character outfits» промпта диалога.
 """
 from typing import Sequence, Union
 
@@ -24,6 +24,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Upgrade schema."""
+    # outfit_tag: style-тег наряда персонажа на момент реплики; NULL — наряд не задан.
     op.add_column(
         'dialogue_lines',
         sa.Column('outfit_tag', sa.String(), nullable=True),

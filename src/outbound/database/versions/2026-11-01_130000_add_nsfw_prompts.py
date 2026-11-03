@@ -1,4 +1,4 @@
-"""Seed the 'nsfw' prompt variant (adult 18+ templates)
+"""Сид варианта промптов nsfw (18+, version 1 для всех ключей)
 
 Revision ID: f1e2d3c4b5a6
 Revises: e7b4a2d9c0f5
@@ -18,9 +18,9 @@ branch_labels = None
 depends_on = None
 
 
-# Тексты варианта ``nsfw`` лежат здесь (в миграции): единственный источник
-# правды для промптов — таблица ``prompts``. Структура, JSON-схемы и плейсхолдеры
-# совпадают с default, меняется только роль (18+) и политика контента.
+# Тексты варианта ``nsfw`` хранятся в миграции: источник правды — таблица ``prompts``.
+# Структура, JSON-схемы и плейсхолдеры совпадают с default; отличаются только роль
+# автора (18+) и политика контента.
 _NSFW_PROMPTS: dict[str, tuple[str, str]] = {
     "novel": (
         """You are a professional author of adult (18+) visual novels. Based on the user's tags and description, create the creative foundation of the story for further generation. The story may include explicit romantic and erotic content between consenting adults (18+); write it as part of the plot — sensuous, in character, never gratuitous and never involving minors. {json_instruction}{codex_block}

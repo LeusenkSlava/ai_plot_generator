@@ -1,4 +1,4 @@
-"""Add dialogue_lines.kind (speech/thought/narration); character_id nullable
+"""dialogue_lines.kind (speech/thought/narration), character_id -> nullable
 
 Revision ID: a1b2c3d4e5f6
 Revises: f1e2d3c4b5a6
@@ -20,7 +20,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Upgrade schema."""
-    # 1. kind — тип реплики (speech/thought/narration). VARCHAR + CHECK, как novels.mode.
+    # 1. kind: тип реплики. native_enum=False — VARCHAR + CHECK, как novels.mode.
+    #    server_default='speech' заполняет существующие строки.
     op.add_column(
         'dialogue_lines',
         sa.Column(
@@ -34,13 +35,13 @@ def upgrade() -> None:
         ),
     )
 
-    # 2. Backfill: is_thought -> kind='thought'.
+    # 2. Бэкфилл: is_thought=true переводится в kind='thought'.
     op.execute("UPDATE dialogue_lines SET kind='thought' WHERE is_thought")
 
-    # 3. character_id становится необязательным (NULL только для kind='narration').
+    # 3. character_id -> NULL: у narration нет говорящего (NULL допустим только для kind='narration').
     op.alter_column('dialogue_lines', 'character_id', nullable=True)
 
-    # 4. is_thought больше не нужен — источник истины kind.
+    # 4. is_thought удаляется: источник правды по типу реплики — kind.
     op.drop_column('dialogue_lines', 'is_thought')
 
 
@@ -51,7 +52,7 @@ def downgrade() -> None:
         sa.Column('is_thought', sa.Boolean(), nullable=False, server_default=sa.false()),
     )
     op.execute("UPDATE dialogue_lines SET is_thought=true WHERE kind='thought'")
-    # Narration-строки (character_id IS NULL) мешают вернуть NOT NULL; на downgrade
-    # остаётся nullable — полная обратимость здесь не гарантируется.
+    # Откат не полностью обратим: строки narration с character_id IS NULL не дают
+    # вернуть NOT NULL, поэтому после downgrade колонка остаётся nullable.
     op.alter_column('dialogue_lines', 'character_id', nullable=False)
     op.drop_column('dialogue_lines', 'kind')

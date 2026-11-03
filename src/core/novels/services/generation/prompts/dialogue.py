@@ -175,7 +175,7 @@ class DialoguePromptBuilder:
                 + "\n".join(f"- {p}" for p in ctx.used_phrases)
             )
 
-        # Диалог пишется и по биту шага роадмапа; иначе шаг обрывался на подходе (см. nsfw_high v2).
+        # Диалог пишется и по биту шага роадмапа; иначе шаг обрывался на подходе (см. nsfw_high v2/v3).
         step_block = "\n".join(
             (
                 f"Roadmap step: {ctx.roadmap.title}",

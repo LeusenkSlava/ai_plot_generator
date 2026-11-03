@@ -1,4 +1,4 @@
-"""Add prompt version 2 for dialogue and scene (narration line kind)
+"""Промпты dialogue и scene version 2: тип реплики kind с narration
 
 Revision ID: b2c3d4e5f6a7
 Revises: a1b2c3d4e5f6
@@ -19,8 +19,8 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
-# Общий блок «For each line» (kind + nullable character_name) — единый для
-# default и nsfw, меняется только роль автора и наличие Content policy.
+# Общий блок «For each line» (kind + character_name, допускающий null) используется
+# и в default, и в nsfw; между вариантами отличаются только роль автора и Content policy.
 _FOR_EACH_LINE_BLOCK = """For each line, specify:
 1. kind - one of "speech", "thought", "narration".
    - "speech": a character speaks out loud; set character_name to the speaker's name.
@@ -43,7 +43,8 @@ _DIALOGUE_PREAMBLE = """ Write lines only for the characters listed in the «Sce
 
 _DIALOGUE_NSFW_CONTENT_POLICY = """Content policy: every character is an adult (18+); dialogue and narration may include explicit adult and erotic content between consenting adults, written in character and serving the scene's conflict and change — never gratuitous and never involving minors."""
 
-# Пункт 2 сцены меняется: описание — короткая завязка, действие/ощущения — в narration.
+# Пункт 2 scene в v2: описание — только завязка (место, время, ситуация, конфликт),
+# действие и ощущения выносятся в narration.
 _SCENE_DESCRIPTION_V2 = "2. description - a short setup of place, time, situation and conflict (2-4 sentences, no more than 400 characters). Do NOT describe the action or sensations here — that is done later as narration lines in the dialogue."
 
 _SCENE_OPENING_DEFAULT = """You are a screenwriter for interactive visual novels. Based on the description of the story and the current roadmap step, create the next scene of this step. It should continue the previous scenes without repeating them and move the plot toward the step's event — carry its conflict and reach its change. The scene should unfold the step's event and establish the place and situation of the action, but not retell the dialogues themselves. Put the step's conflict into the description as a concrete crisis or obstacle (what makes the event hard), not just its outcome. Specify:"""
@@ -105,13 +106,14 @@ def _scene_system(variant: str) -> str:
     policy = (
         "\n" + _SCENE_NSFW_CONTENT_POLICY if variant == "nsfw" else ""
     )
-    # .replace(), а не .format(): в тексте JSON-схемы есть литеральные фигурные скобки.
+    # Подстановка через .replace(), а не .format(): в JSON-схеме есть литеральные
+    # фигурные скобки, которые .format() принял бы за плейсхолдеры.
     items = _SCENE_ITEMS.replace("{description_item}", _SCENE_DESCRIPTION_V2)
     return opening + "\n" + items + policy + "\n{russian_note}"
 
 
-# Ключи, чей шаблон меняется в version 2. story_context остаётся в version 1 —
-# его шаблон не меняется, меняется только рендер диалога в коде.
+# Ключи, переизданные в version 2. story_context остаётся в version 1: его шаблон
+# не менялся, изменилась только сборка диалога в коде.
 _V2_KEYS = ("dialogue", "scene")
 
 
@@ -149,7 +151,7 @@ def upgrade() -> None:
             )
     op.bulk_insert(prompts_table, rows)
 
-    # Деактивируем version 1 для переизданных ключей (по обоим вариантам).
+    # Деактивация version 1 переизданных ключей в обоих вариантах (default, nsfw).
     op.execute(
         sa.text(
             "UPDATE prompts SET is_active=false "

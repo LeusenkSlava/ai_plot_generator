@@ -149,11 +149,12 @@ def main() -> int:
     )
     parser.add_argument(
         "--prompt-variant",
-        choices=("default", "nsfw_low", "nsfw_medium", "nsfw_high", "nsfw"),
+        choices=("default", "nsfw_low", "nsfw_medium", "nsfw_high", "nsfw_extra", "nsfw"),
         default=None,
         help=(
-            "Вариант набора промптов (default | nsfw_low | nsfw_medium | nsfw_high | nsfw); "
-            "nsfw — устаревший вариант с тем же содержимым, что nsfw_high, по умолчанию default"
+            "Вариант набора промптов (default | nsfw_low | nsfw_medium | nsfw_high | nsfw_extra | nsfw); "
+            "nsfw_extra — тестовый режим «чистый секс», nsfw — устаревший вариант "
+            "с тем же содержимым, что nsfw_high, по умолчанию default"
         ),
     )
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL, help=f"Адрес My Choice API (по умолчанию {DEFAULT_BASE_URL})")

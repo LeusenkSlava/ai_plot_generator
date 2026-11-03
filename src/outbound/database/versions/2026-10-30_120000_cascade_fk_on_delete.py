@@ -1,4 +1,4 @@
-"""Cascade ON DELETE for generation FK graph
+"""ON DELETE CASCADE / SET NULL для FK графа генерации
 
 Revision ID: c2f8b7d1e4a9
 Revises: 8fc7cad0eeab
@@ -17,10 +17,10 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
-# Единственный источник истины про удаление потомков — СУБД (ON DELETE CASCADE).
-# Раньше компенсация саги чистила детей вручную сырым SQL в правильном порядке;
-# теперь удаление родителя (novels / scenes) каскадно удаляет всё дерево.
-# next_roadmap_id — опциональная ссылка, поэтому SET NULL, а не CASCADE.
+# Удаление потомков делегировано СУБД через ON DELETE CASCADE; ручная очистка
+# дочерних строк в компенсации саги больше не выполняется. Удаление novels или
+# scenes каскадно удаляет всё поддерево.
+# next_roadmap_id — необязательная ссылка: ON DELETE SET NULL, а не CASCADE.
 _CASCADE_FKS = {
     'characters': [
         ('characters_novel_id_fkey', 'novels', ['novel_id'], ['id']),

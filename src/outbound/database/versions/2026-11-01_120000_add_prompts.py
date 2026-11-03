@@ -1,4 +1,4 @@
-"""Add prompts table (versioned prompt templates) and novels.prompt_variant
+"""Таблица prompts (версионируемые шаблоны промптов) и novels.prompt_variant
 
 Revision ID: e7b4a2d9c0f5
 Revises: f4a6c8d0e2b5
@@ -19,9 +19,9 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
-# Тексты варианта ``default`` лежат здесь (в миграции), а не в коде: единственный
-# источник правды для промптов — таблица ``prompts``. В рантайме эти тексты не
-# читаются; отсутствие активной версии в БД — ошибка (``PromptNotFoundError``).
+# Тексты варианта ``default`` хранятся в миграции, а не в коде: источник правды —
+# таблица ``prompts``. Рантайм их не читает; если у ключа нет активной версии,
+# каталог промптов бросает ``PromptNotFoundError``.
 _DEFAULT_PROMPTS: dict[str, tuple[str, str]] = {
     "novel": (
         """You are a screenwriter for interactive visual novels. Based on the user's tags and description, create the creative foundation of the story for further generation. {json_instruction}{codex_block}
@@ -233,7 +233,8 @@ Scene day: {scene_day}""",
 
 def upgrade() -> None:
     """Upgrade schema."""
-    # 1. novels.prompt_variant — набор промптов (default, nsfw, …).
+    # 1. novels.prompt_variant: вариант промптов новеллы (default, nsfw, …),
+    #    проставляется при создании новеллы; у уже созданных новелл значение default.
     op.add_column(
         'novels',
         sa.Column(
@@ -244,7 +245,8 @@ def upgrade() -> None:
         ),
     )
 
-    # 2. prompts — версионируемые шаблоны промптов (append-only).
+    # 2. prompts: версионируемые шаблоны. Уникальность (key, variant, version);
+    #    активная версия ключа одна — переключение делается через is_active.
     op.create_table(
         'prompts',
         sa.Column('id', sa.Integer(), nullable=False),
@@ -263,7 +265,7 @@ def upgrade() -> None:
     op.create_index(op.f('ix_prompts_key'), 'prompts', ['key'], unique=False)
     op.create_index(op.f('ix_prompts_variant'), 'prompts', ['variant'], unique=False)
 
-    # 3. Сид версии 1 (вариант default).
+    # 3. Сид version 1 варианта default: по одной активной строке на ключ.
     prompts_table = sa.table(
         'prompts',
         sa.column('key', sa.String()),

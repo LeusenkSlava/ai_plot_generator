@@ -1,14 +1,16 @@
-"""Add roadmap prompt version 2: pass the user's original prompt
+"""Промпт roadmap version 2: в user-шаблон передаётся исходный запрос пользователя
 
 Revision ID: d4e5f6a7b8c9
 Revises: c3d4e5f6a7b8
 Create Date: 2026-11-02 14:00:00.000000
 
-Причина: роадмап строился только из LLM-описания новеллы
-(title/description/tone), а исходный запрос пользователя (user_prompt) терялся —
-детали и теги, которые LLM не перенёс в description, до роадмапа не доходили.
-Добавляем {user_prompt} в user-шаблон, чтобы генератор роадмапа видел исходный
-замысел. system-шаблон не меняется — копируем его из активной версии 1.
+Предпосылка: roadmap строился только из LLM-описания новеллы (title/description/
+tone). Исходный user_prompt в промпт не передавался, поэтому его детали и теги,
+не перенесённые в description, до роадмапа не доходили.
+
+Изменения в version 2 (ключ roadmap):
+- в начало user-шаблона добавляется плейсхолдер {user_prompt};
+- system-шаблон не меняется: при вставке копируется из активной version 1.
 """
 from datetime import UTC, datetime
 from typing import Sequence, Union
@@ -24,7 +26,7 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
-# user-шаблон версии 2: в начало добавлен исходный запрос пользователя.
+# user-шаблон version 2: {user_prompt} первым полем.
 _ROADMAP_USER = """User request: {user_prompt}
 
 Title: {title}
@@ -35,7 +37,7 @@ Narrative tone: {tone}{place_time_catalog}{characters_block}"""
 def upgrade() -> None:
     """Upgrade schema: version 2 промпта roadmap, деактивация version 1."""
     now = datetime.now(UTC)
-    # system-шаблон не меняется — переносим его из активной version 1 как есть.
+    # system-шаблон берётся из активной version 1 без изменений (INSERT ... SELECT).
     op.execute(
         sa.text(
             """
@@ -48,7 +50,7 @@ def upgrade() -> None:
         ).bindparams(user_template=_ROADMAP_USER, now=now)
     )
 
-    # Деактивируем version 1 для переизданного ключа (по обоим вариантам).
+    # Деактивация version 1 ключа roadmap в обоих вариантах (default, nsfw).
     op.execute(
         sa.text(
             "UPDATE prompts SET is_active = false "

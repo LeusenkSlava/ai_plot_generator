@@ -1,4 +1,4 @@
-"""Split roadmap goal into event/conflict/change
+"""roadmap.goal заменён на event/conflict/change
 
 Revision ID: b7e4d9f0c3a6
 Revises: a3f9c1d7e2b4
@@ -20,14 +20,15 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Upgrade schema."""
-    # Единую расплывчатую цель шага разбиваем на три оси, чтобы сцена и валидатор
-    # получали чёткий эталон: что происходит (event), что мешает (conflict),
-    # что меняется для героя (change). DEFAULT '' сохранён намеренно: пустая строка
-    # в этих полях означает «не задано» и не требует отдельного NULL-состояния.
+    # Цель шага разбита на три оси — эталон для генерации и валидации сцены:
+    # event — что происходит, conflict — что этому мешает, change — что меняется
+    # у протагониста к концу шага.
+    # server_default='' намеренно: пустая строка трактуется как «не задано»,
+    # отдельное NULL-состояние не требуется, колонка остаётся NOT NULL.
     op.add_column('roadmap', sa.Column('event', sa.String(), nullable=False, server_default=''))
     op.add_column('roadmap', sa.Column('conflict', sa.String(), nullable=False, server_default=''))
     op.add_column('roadmap', sa.Column('change', sa.String(), nullable=False, server_default=''))
-    # Существующие строки: старый goal сохраняем как событие.
+    # Бэкфилл: значение прежнего goal переносится в event.
     op.execute("UPDATE roadmap SET event = goal")
     op.drop_column('roadmap', 'goal')
 

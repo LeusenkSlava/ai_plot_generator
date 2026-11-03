@@ -1,4 +1,4 @@
-"""add sound_asset_key to dialogue_lines
+"""Добавлено dialogue_lines.sound_asset_key
 
 Revision ID: 8fc7cad0eeab
 Revises: b7e4d9f0c3a6
@@ -20,8 +20,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Upgrade schema."""
-    # Эмбиент задника (asset_key .ogg) денормализуется в реплику, как и остальные
-    # asset_key. Старые реплики получают NULL — бэкфилл не нужен.
+    # sound_asset_key: ключ фонового звука (.ogg), денормализован в реплику наравне
+    # с остальными asset_key. Существующие строки получают NULL, бэкфилл не выполняется.
     op.add_column('dialogue_lines', sa.Column('sound_asset_key', sa.String(), nullable=True))
 
 

@@ -1,4 +1,4 @@
-"""Add  models
+"""Начальная схема: generation_jobs, novels, characters, roadmap, scenes, dialogue_lines, dialogue_actions
 
 Revision ID: 8d4f9a6cf3a1
 Revises: 

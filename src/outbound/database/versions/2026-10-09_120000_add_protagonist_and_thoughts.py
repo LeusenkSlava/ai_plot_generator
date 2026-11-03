@@ -1,4 +1,4 @@
-"""Add protagonist and thoughts
+"""Добавлены characters.is_protagonist и dialogue_lines.is_thought
 
 Revision ID: 7b3d5e8f9a1c
 Revises: 8d4f9a6cf3a1
@@ -20,13 +20,14 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Upgrade schema."""
-    # is_protagonist: главный герой/героиня (без спрайта, доступны мысли).
-    # server_default для существующих строк, дальше значение задаёт приложение.
+    # is_protagonist: флаг протагониста (один на новеллу; спрайт не показывается,
+    # доступны мысли). server_default заполняет существующие строки, далее значение
+    # выставляет приложение.
     op.add_column(
         'characters',
         sa.Column('is_protagonist', sa.Boolean(), nullable=False, server_default=sa.false()),
     )
-    # is_thought: реплика-внутренние мысли (значимо для протагониста).
+    # is_thought: реплика — внутренний монолог протагониста.
     op.add_column(
         'dialogue_lines',
         sa.Column('is_thought', sa.Boolean(), nullable=False, server_default=sa.false()),

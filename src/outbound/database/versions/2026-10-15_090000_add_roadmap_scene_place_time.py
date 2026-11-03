@@ -1,4 +1,4 @@
-"""Add roadmap and scene place/time
+"""Добавлены location_slug, time_of_day, day в roadmap и scenes
 
 Revision ID: e9f3c7d2b5a1
 Revises: d4e8b2c0a3f6
@@ -20,8 +20,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Upgrade schema."""
-    # Место и время действия: шаг роадмапа задаёт локацию/время суток/день,
-    # сцена их наследует. По этим полям валидатор сверяет сцену с шагом.
+    # location_slug / time_of_day / day: шаг роадмапа задаёт место и время действия,
+    # сцена наследует значения. Валидатор сверяет сцену с шагом по этим полям.
     for table in ('roadmap', 'scenes'):
         op.add_column(table, sa.Column('location_slug', sa.String(), nullable=True))
         op.add_column(table, sa.Column('time_of_day', sa.String(), nullable=True))

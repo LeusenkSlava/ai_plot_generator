@@ -28,6 +28,9 @@ class PromptVariant(StrEnum):
     NSFW_LOW = "nsfw_low"
     NSFW_MEDIUM = "nsfw_medium"
     NSFW_HIGH = "nsfw_high"
+    # Тестовый вариант «чистый секс»: тексты v3 комплекта nsfw_high, вынесенные
+    # в отдельный набор, чтобы nsfw_high оставался на проверенной версии.
+    NSFW_EXTRA = "nsfw_extra"
 
 
 DEFAULT_PROMPT_VARIANT = PromptVariant.DEFAULT

@@ -1,4 +1,4 @@
-"""Add scene manual review flags
+"""Добавлены scenes.needs_review и scenes.review_reason
 
 Revision ID: c3f7a1b9d2e5
 Revises: 7b3d5e8f9a1c
@@ -20,13 +20,13 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Upgrade schema."""
-    # needs_review: сцена не прошла смысловую проверку соответствия шагу роадмапа
-    # даже после ретраев и требует ручного вмешательства.
+    # needs_review: валидатор не подтвердил соответствие сцены шагу роадмапа после
+    # всех ретраев; сцена помечается для ручного разбора.
     op.add_column(
         'scenes',
         sa.Column('needs_review', sa.Boolean(), nullable=False, server_default=sa.false()),
     )
-    # review_reason: причина расхождения (пишется вместе с needs_review и в llm_logs).
+    # review_reason: причина расхождения; заполняется вместе с needs_review и дублируется в llm_logs.
     op.add_column(
         'scenes',
         sa.Column('review_reason', sa.Text(), nullable=True),

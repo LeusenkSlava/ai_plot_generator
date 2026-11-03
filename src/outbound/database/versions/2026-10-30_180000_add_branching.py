@@ -1,4 +1,4 @@
-"""Add branching: novels.mode, roadmap tree, roadmap_choices, player_choices
+"""Ветвление: novels.mode, дерево roadmap, roadmap_choices, player_choices
 
 Revision ID: f4a6c8d0e2b5
 Revises: c2f8b7d1e4a9
@@ -20,7 +20,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Upgrade schema."""
-    # 1. novels.mode — режим интерактивности (линейная / с выборами).
+    # 1. novels.mode: режим интерактивности — linear | interactive.
+    #    Диалектное имя novelmode компилируется в VARCHAR + CHECK (native_enum=False).
     op.add_column(
         'novels',
         sa.Column(
@@ -31,17 +32,17 @@ def upgrade() -> None:
         ),
     )
 
-    # 2. roadmap: глобальный порядковый step_id перестаёт быть адресом —
-    #    становится глубиной по пути (может повторяться между ветками).
+    # 2. roadmap.step_id -> depth: номер шага теперь глубина по пути, а не глобальный
+    #    адрес в новелле и может повторяться в разных ветках.
     op.alter_column('roadmap', 'step_id', new_column_name='depth')
 
-    # 3. roadmap: номер ветки (0 = истинная).
+    # 3. roadmap.branch_id: номер ветки, 0 — истинная ветка.
     op.add_column(
         'roadmap',
         sa.Column('branch_id', sa.Integer(), nullable=False, server_default='0'),
     )
 
-    # 4. roadmap: ребро дерева — из какого шага пришли (NULL только у корня).
+    # 4. roadmap.parent_roadmap_id: ребро дерева на шаг-родителя. NULL только у корня.
     op.add_column(
         'roadmap',
         sa.Column('parent_roadmap_id', sa.Integer(), nullable=True),
@@ -56,8 +57,8 @@ def upgrade() -> None:
         op.f('ix_roadmap_parent_roadmap_id'), 'roadmap', ['parent_roadmap_id'], unique=False
     )
 
-    # 5. Backfill: для уже существующих линейных новелл строим цепочку родительских
-    #    ссылок по порядку depth — старые новеллы остаются рабочим истинным спайном.
+    # 5. Бэкфилл: для существующих линейных новелл родитель — шаг с depth - 1 той же
+    #    новеллы, так шаги складываются в истинный спайн.
     op.execute(
         """
         UPDATE roadmap r
@@ -72,7 +73,9 @@ def upgrade() -> None:
         """
     )
 
-    # 6. roadmap_choices — варианты выбора (определение уровня шага роадмапа).
+    # 6. roadmap_choices: варианты выбора на шаге роадмапа. is_true — вариант
+    #    истинной ветки, branch_direction — описание альтернативной ветки,
+    #    next_roadmap_id — шаг, на который ведёт вариант.
     op.create_table(
         'roadmap_choices',
         sa.Column('id', sa.Integer(), nullable=False),
@@ -97,7 +100,8 @@ def upgrade() -> None:
         ['next_roadmap_id'], ['id'], ondelete='SET NULL',
     )
 
-    # 7. player_choices — журнал выбранных вариантов (однозначный путь игрока).
+    # 7. player_choices: журнал выбранных вариантов — путь игрока по дереву.
+    #    UNIQUE(roadmap_choice_id) гарантирует, что вариант выбирается один раз.
     op.create_table(
         'player_choices',
         sa.Column('id', sa.Integer(), nullable=False),
@@ -124,7 +128,7 @@ def upgrade() -> None:
         ['dialogue_line_id'], ['id'], ondelete='SET NULL',
     )
 
-    # 8. dialogue_actions заменён на roadmap_choices.
+    # 8. dialogue_actions удаляется: выборами управляет roadmap_choices.
     op.drop_table('dialogue_actions')
 
 

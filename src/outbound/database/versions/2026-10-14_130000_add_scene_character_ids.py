@@ -1,4 +1,4 @@
-"""Add scene character ids
+"""Добавлено scenes.character_ids (ARRAY(Integer))
 
 Revision ID: d4e8b2c0a3f6
 Revises: c3f7a1b9d2e5
@@ -21,8 +21,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Upgrade schema."""
-    # character_ids: типизированный список id персонажей, присутствующих в сцене.
-    # Формируется SceneGenerator и передаётся в DialogueGenerator вместо всего каста.
+    # character_ids: id персонажей сцены. Заполняет SceneGenerator; DialogueGenerator
+    # получает этот список вместо полного каста новеллы.
     op.add_column(
         'scenes',
         sa.Column('character_ids', postgresql.ARRAY(sa.Integer()), nullable=True),

@@ -1,4 +1,4 @@
-"""Add character gender
+"""Добавлено characters.gender
 
 Revision ID: a3f9c1d7e2b4
 Revises: e9f3c7d2b5a1
@@ -20,7 +20,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Upgrade schema."""
-    # gender: пол персонажа из Codex; nullable — для персонажей без вселенной/маппинга.
+    # gender: пол персонажа, берётся из Codex. NULL — персонаж без вселенной или без маппинга.
     op.add_column(
         'characters',
         sa.Column('gender', sa.String(), nullable=True),
