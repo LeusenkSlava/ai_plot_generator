@@ -81,7 +81,7 @@ def roadmap_domain(
     created_at: datetime | None = None,
     updated_at: datetime | None = None,
     novel_id: int = 1,
-    step_id: int = 1,
+    depth: int = 1,
     title: str = "Шаг 1",
     event: str = "Событие шага",
     conflict: str = "Конфликт шага",
@@ -92,13 +92,15 @@ def roadmap_domain(
     location_slug: str | None = None,
     time_of_day: str | None = None,
     day: int | None = None,
+    parent_roadmap_id: int | None = None,
+    branch_id: int = 0,
 ) -> Roadmap:
     return Roadmap(
         id=id,
         created_at=created_at,
         updated_at=updated_at,
         novel_id=novel_id,
-        step_id=step_id,
+        depth=depth,
         title=title,
         event=event,
         conflict=conflict,
@@ -109,6 +111,8 @@ def roadmap_domain(
         location_slug=location_slug,
         time_of_day=time_of_day,
         day=day,
+        parent_roadmap_id=parent_roadmap_id,
+        branch_id=branch_id,
     )
 
 

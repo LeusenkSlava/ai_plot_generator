@@ -54,7 +54,8 @@ src/
   - `generators/` — по генератору на сущность, все наследуют `BaseGenerator` (оборачивает вызов LLM в `llm_step`,
     ошибки превращает в `GenerationError`); порядок: novel → characters → roadmap → scene → dialogue → story_context;
   - `composition.py` (`NovelCompositionService`) — сборка новеллы до первой сцены с диалогом;
-  - `continuation.py` (`SceneContinuationService`) — догенерация следующей сцены по роадмапу;
+  - `continuation.py` (`SceneContinuationService`) — догенерация следующей сцены по роадмапу; сцену, уже
+    записанную без реплик (воркер упал между сценой и диалогом), достраивает, а не отдаёт готовой;
   - `state.py` (`NovelState`) — снапшот роадмапа/сцен/реплик и расчёт следующего слота;
   - `assets.py` (`SceneAssetService`) — резолв спрайтов/фонов/одежды/эмоций из Codex;
   - `prompts/` — форматтеры промптов (текст, состав персонажей, контекст вселенной) и каталог шаблонов из БД.
@@ -189,14 +190,17 @@ uv run pytest
 
 ```json
 {"status": "ok", "step": {"dialogue": {...}, "scene": {...}, "character": {...}}}
-{"status": "need_generation", "next_scene_order": 4}
-{"status": "generating", "next_scene_order": 4}
+{"status": "need_generation", "next_roadmap_id": 5, "next_position": 2}
+{"status": "generating", "next_roadmap_id": 5, "next_position": 2}
 {"status": "finished"}
 ```
 
 - `need_generation` — реплики исчерпаны, роадмап не пройден: отправить в Kafka `ai_plot.scene.generate` для сцены
-  `next_scene_order`, после `done` повторить запрос с тем же `offset`;
-- `generating` — сцена уже генерируется.
+  `(next_roadmap_id, next_position)`, после `done` повторить запрос с тем же `offset`;
+- `generating` — сцена уже генерируется (или её диалог ещё пишется);
+- `finished` — новелла пройдена: все шаги сыгранного пути закрыты, у их сцен есть реплики, а на развилках пути
+  зафиксирован выбор. Сцена коммитится до генерации диалога, поэтому, пока реплики сцены ещё не записаны, вместо
+  `finished` возвращается `need_generation`/`generating` для этой сцены.
 
 Выбор игрока: тело `POST /novels/{novel_id}/choice` — `{"roadmap_choice_id": 12, "dialogue_line_id": 987}`. Ответ
 `ok` — продолжение готово (истинный вариант или уже сгенерированная ветка); `need_branch_generation` — клиент

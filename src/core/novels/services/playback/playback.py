@@ -18,7 +18,11 @@ from src.core.novels.interfaces.repository import (
     SceneRepositoryProtocol,
 )
 from src.core.novels.models import Character, DialogueLine, RoadmapChoice, Scene
-from src.core.novels.services.generation.state import resolve_next_slot
+from src.core.novels.services.generation.state import (
+    resolve_incomplete_scene_slot,
+    resolve_next_slot,
+    scene_ids_with_lines,
+)
 
 
 class PlaybackStatus(str, Enum):
@@ -99,7 +103,7 @@ class NovelPlaybackService:
                 )
             return PlaybackResult(status=PlaybackStatus.OK, step=step)
 
-        return await self._resolve_tail_status(novel_id)
+        return await self._resolve_tail_status(novel_id, lines)
 
     async def _exclude_review_lines(
         self, novel_id: int, lines: list[DialogueLine]
@@ -134,12 +138,25 @@ class NovelPlaybackService:
         roadmap = await self._roadmaps.get_by_id(scene.roadmap_id)
         return roadmap is not None and roadmap.target_choice
 
-    async def _resolve_tail_status(self, novel_id: int) -> PlaybackResult:
+    async def _resolve_tail_status(
+        self, novel_id: int, lines: list[DialogueLine]
+    ) -> PlaybackResult:
         roadmaps = await self._roadmaps.list_by_novel_id(novel_id)
         scenes = await self._scenes.list_by_novel_id(novel_id)
         choices = await self._roadmap_choices.list_by_novel_id(novel_id)
         player_choices = await self._player_choices.list_by_novel_id(novel_id)
-        slot = resolve_next_slot(roadmaps, scenes, choices, player_choices)
+
+        # Сцена коммитится до генерации диалога, поэтому шаг бывает уже закрыт по
+        # числу сцен, пока реплик нет. Ждём именно эту сцену, а не отдаём финал.
+        slot = resolve_incomplete_scene_slot(
+            roadmaps,
+            scenes,
+            choices,
+            player_choices,
+            scene_ids_with_lines(lines),
+        )
+        if slot is None:
+            slot = resolve_next_slot(roadmaps, scenes, choices, player_choices)
         if slot is None:
             return PlaybackResult(status=PlaybackStatus.FINISHED)
 

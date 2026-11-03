@@ -1,4 +1,5 @@
 import logging
+from dataclasses import dataclass
 
 from src.core.novels.exceptions import (
     NovelFinishedError,
@@ -25,6 +26,19 @@ from src.core.novels.services.generation.state import NextSceneSlot, NovelState
 from src.core.novels.services.generation.transactions import TransactionFactory
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class _ContinuationPlan:
+    """Результат read-фазы: снапшот и что с ним делать.
+
+    ``existing`` — сцена уже записана (её реплики проверяет ``_generate``);
+    ``slot`` — слота ещё нет, нужен полный пайплайн. Ровно одно из полей задано.
+    """
+
+    state: NovelState
+    existing: Scene | None = None
+    slot: NextSceneSlot | None = None
 
 
 class SceneContinuationService:
@@ -78,16 +92,36 @@ class SceneContinuationService:
         step: TransactionFactory,
     ) -> Scene:
         """Возвращает сцену. Read-фаза коммитится отдельно (``step``)."""
+        plan = await self._read_plan(novel_id, roadmap_id, position, step=step)
+        if plan.existing is not None:
+            if not plan.state.scene_has_lines(plan.existing.id):
+                await self._fill_dialogue(plan.existing, plan.state, step=step)
+            return plan.existing
+        if plan.slot is None:
+            raise NovelFinishedError(novel_id)
+        return await self._run_pipeline(plan.slot, plan.state, step=step)
+
+    async def _read_plan(
+        self,
+        novel_id: int,
+        roadmap_id: int,
+        position: int,
+        *,
+        step: TransactionFactory,
+    ) -> _ContinuationPlan:
+        """Прочитать снапшот и решить, что генерировать (без вызовов LLM)."""
         async with step():
             if await self._novels.get_by_id(novel_id) is None:
                 raise NovelNotFoundError(novel_id)
 
             state = await self._load_state(novel_id)
 
-            # Идемпотентность по (roadmap_id, position): повторная доставка сообщения
-            # возвращает уже сгенерированную сцену.
-            if (existing := state.scene_at_step_position(roadmap_id, position)) is not None:
-                return existing
+            # Идемпотентность по (roadmap_id, position): повторная доставка
+            # возвращает готовую сцену. Сцена без реплик не готова — воркер упал
+            # между её записью и диалогом; дописываем диалог (вне транзакции).
+            existing = state.scene_at_step_position(roadmap_id, position)
+            if existing is not None:
+                return _ContinuationPlan(state=state, existing=existing)
 
             slot = state.resolve_next_slot()
             if slot is None:
@@ -99,7 +133,17 @@ class SceneContinuationService:
                     f"roadmap={slot.roadmap.id},position={slot.position}",
                 )
 
-        return await self._run_pipeline(slot, state, step=step)
+            # Сцена коммитится до генерации диалога: шаг мог «закрыться» по числу
+            # сцен, пока предыдущая сцена ещё без реплик. Не генерируем поверх неё.
+            incomplete = state.first_scene_without_lines_before(slot.order)
+            if incomplete is not None:
+                raise SceneOrderError(
+                    novel_id,
+                    f"roadmap={roadmap_id},position={position}",
+                    f"scene order={incomplete.order} (without dialogue)",
+                )
+
+            return _ContinuationPlan(state=state, slot=slot)
 
     async def _load_state(self, novel_id: int) -> NovelState:
         roadmaps = await self._roadmaps.list_by_novel_id(novel_id)
@@ -118,13 +162,15 @@ class SceneContinuationService:
     async def _run_pipeline(
         self, slot: NextSceneSlot, state: NovelState, *, step: TransactionFactory
     ) -> Scene:
-        story_text = render_story_context(state.last_story_context)
+        story_text = render_story_context(
+            state.last_story_context_before(slot.order)
+        )
 
         scene: Scene | None = None
         try:
             scene = await self._scene_generator.generate(
                 slot.roadmap.id,
-                previous_scenes=state.last_scenes,
+                previous_scenes=state.last_scenes_before(slot.order),
                 story_context=story_text,
                 position=slot.position,
                 order=slot.order,
@@ -134,23 +180,7 @@ class SceneContinuationService:
             if scene.needs_review:
                 return scene
 
-            await self._dialogue_generator.generate(
-                scene.id,
-                previous_lines=state.previous_dialogue_lines,
-                story_context=story_text,
-                all_lines=state.dialogue_lines,
-                previous_scene=state.last_scenes[-1] if state.last_scenes else None,
-                step=step,
-            )
-
-            # После финальной сцены контекст некому читать: его берёт только генерация
-            # следующей сцены, а её не будет. Пропускаем вызов, чтобы не платить за мёртвый контекст.
-            if scene.is_final_for_novel:
-                return scene
-
-            await self._story_context_generator.generate(
-                scene.id, previous_context=state.last_story_context, step=step
-            )
+            await self._fill_dialogue(scene, state, step=step)
             return scene
         except Exception:
             # Компенсация: сцена уже закоммичена, а диалог/контекст не доехали —
@@ -165,3 +195,38 @@ class SceneContinuationService:
                         scene.id,
                     )
             raise
+
+    async def _fill_dialogue(
+        self, scene: Scene, state: NovelState, *, step: TransactionFactory
+    ) -> None:
+        """Записать реплики и изложение для уже закоммиченной сцены.
+
+        Вызывается и для новой сцены, и для сцены без реплик после падения воркера.
+        Контекст берётся из ``state`` строго до ``scene.order``: если «сирота» не
+        последняя, глобальный хвост снапшота содержал бы сцены из будущего.
+        """
+        story_text = render_story_context(
+            state.last_story_context_before(scene.order)
+        )
+        previous_scenes = state.last_scenes_before(scene.order)
+
+        await self._dialogue_generator.generate(
+            scene.id,
+            previous_lines=state.previous_dialogue_lines_before(scene.order),
+            story_context=story_text,
+            all_lines=state.dialogue_lines_before(scene.order),
+            previous_scene=previous_scenes[-1] if previous_scenes else None,
+            step=step,
+        )
+
+        # После финальной сцены контекст некому читать: его берёт только генерация
+        # следующей сцены, а её не будет. Пропускаем вызов, чтобы не платить
+        # за мёртвый контекст.
+        if scene.is_final_for_novel:
+            return
+
+        await self._story_context_generator.generate(
+            scene.id,
+            previous_context=state.last_story_context_before(scene.order),
+            step=step,
+        )

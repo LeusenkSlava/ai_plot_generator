@@ -210,4 +210,4 @@ def test_current_outfits_uses_stored_style_tag():
         [character], assets, {character.id: "swimsuit"}
     )
 
-    assert rendered == "- Алиса: outfit_tag swimsuit (Купальник)"x
+    assert rendered == "- Алиса: outfit_tag swimsuit (Купальник)"
