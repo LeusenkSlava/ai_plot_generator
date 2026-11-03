@@ -2,10 +2,18 @@ import logging
 
 from src.core.novels.exceptions import GenerationError, NovelGenerationFailedError
 from src.core.novels.llm_trace import llm_trace
-from src.core.novels.models import DEFAULT_PROMPT_VARIANT, Novel, NovelMode
+from src.core.novels.models import (
+    DEFAULT_PROMPT_VARIANT,
+    Novel,
+    NovelMode,
+    PromptVariant,
+)
 from src.core.novels.services.generation.generators.character import CharacterGenerator
 from src.core.novels.services.generation.generators.dialogue import DialogueGenerator
 from src.core.novels.services.generation.generators.novel import NovelGenerator
+from src.core.novels.services.generation.generators.plot_design import (
+    PlotDesignGenerator,
+)
 from src.core.novels.services.generation.generators.roadmap import RoadmapGenerator
 from src.core.novels.services.generation.generators.scene import SceneGenerator
 from src.core.novels.services.generation.generators.story_context import (
@@ -15,12 +23,24 @@ from src.core.novels.services.generation.transactions import TransactionFactory
 
 logger = logging.getLogger(__name__)
 
+# Варианты с design-проходом. nsfw_extra исключён: чистому сексу без драматургии
+# форма истории и бюджет нитей не нужны.
+PLOT_DESIGN_VARIANTS: frozenset[PromptVariant] = frozenset(
+    {
+        PromptVariant.DEFAULT,
+        PromptVariant.NSFW_LOW,
+        PromptVariant.NSFW_MEDIUM,
+        PromptVariant.NSFW_HIGH,
+    }
+)
+
 
 class NovelCompositionService:
     def __init__(
         self,
         novel_generator: NovelGenerator,
         character_generator: CharacterGenerator,
+        plot_design_generator: PlotDesignGenerator,
         roadmap_generator: RoadmapGenerator,
         scene_generator: SceneGenerator,
         dialogue_generator: DialogueGenerator,
@@ -28,6 +48,7 @@ class NovelCompositionService:
     ):
         self._novel_generator = novel_generator
         self._character_generator = character_generator
+        self._plot_design_generator = plot_design_generator
         self._roadmap_generator = roadmap_generator
         self._scene_generator = scene_generator
         self._dialogue_generator = dialogue_generator
@@ -63,8 +84,15 @@ class NovelCompositionService:
 
                 await self._character_generator.generate(novel.id, step=step)
 
+                # Дешёвый design-doc до роадмапа: форма, нити и их бюджет.
+                design = None
+                if novel.prompt_variant in PLOT_DESIGN_VARIANTS:
+                    design = await self._plot_design_generator.generate(
+                        novel.id, user_prompt=user_promt, step=step
+                    )
+
                 roadmap = await self._roadmap_generator.generate(
-                    novel.id, user_prompt=user_promt, step=step
+                    novel.id, user_prompt=user_promt, design=design, step=step
                 )
 
                 # Первая сцена — отдельный признак, не разовая настройка.

@@ -91,6 +91,7 @@ class RoadmapRepository:
             target_choice=roadmap.target_choice,
             choice_stakes=roadmap.choice_stakes,
             scenes_count=roadmap.scenes_count,
+            beat_type=roadmap.beat_type,
             location_slug=roadmap.location_slug,
             time_of_day=roadmap.time_of_day,
             day=roadmap.day,
@@ -136,6 +137,7 @@ class RoadmapRepository:
             target_choice=db_roadmap.target_choice,
             choice_stakes=db_roadmap.choice_stakes,
             scenes_count=db_roadmap.scenes_count,
+            beat_type=db_roadmap.beat_type,
             location_slug=db_roadmap.location_slug,
             time_of_day=db_roadmap.time_of_day,
             day=db_roadmap.day,
@@ -242,6 +244,7 @@ class NovelRepository:
             universe_id=novel.universe_id,
             mode=novel.mode,
             prompt_variant=novel.prompt_variant,
+            plot_design=novel.plot_design,
         )
         self._session.add(db_novel)
         await self._session.flush()
@@ -275,6 +278,13 @@ class NovelRepository:
         if db_novel:
             await self._session.delete(db_novel)
 
+    async def update_plot_design(self, novel_id: int, plot_design: dict) -> None:
+        """Сохраняет снапшот design-doc новеллы (колонка JSONB)."""
+        db_novel = await self._session.get(NovelModel, novel_id)
+        if db_novel:
+            db_novel.plot_design = plot_design
+            await self._session.flush()
+
     @staticmethod
     def _to_domain(db_novel: NovelModel) -> Novel:
         return Novel(
@@ -286,6 +296,7 @@ class NovelRepository:
             universe_id=db_novel.universe_id,
             mode=db_novel.mode,
             prompt_variant=PromptVariant(db_novel.prompt_variant),
+            plot_design=db_novel.plot_design,
             created_at=db_novel.created_at,
             updated_at=db_novel.updated_at,
         )

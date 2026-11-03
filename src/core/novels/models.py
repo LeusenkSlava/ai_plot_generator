@@ -45,6 +45,7 @@ class PromptKey(StrEnum):
     STORY_CONTEXT = "story_context"
     BRANCH_ROADMAP = "branch_roadmap"
     SCENE_VALIDATOR = "scene_validator"
+    PLOT_DESIGN = "plot_design"
 
 
 @dataclass
@@ -81,6 +82,10 @@ class Roadmap:
     target_choice: bool
     choice_stakes: str | None
     scenes_count: int
+    # тип бита шага: setup|escalation|intimacy|texture|obstacle|reversal|resolution.
+    # Задаётся RoadmapGenerator по дизайн-документу и делает видимым, за счёт чего
+    # двигается шаг (сюжет или тихий/интимный бит).
+    beat_type: str | None = None
     # место и время действия шага. Задаются RoadmapGenerator из каталога локаций
     # Codex и делают оси location/time у валидатора сцен осмысленными.
     location_slug: str | None = None
@@ -136,6 +141,8 @@ class Novel(LLMGeneratedModel):
     mode: NovelMode = NovelMode.LINEAR
 
     prompt_variant: PromptVariant = DEFAULT_PROMPT_VARIANT
+    # снапшот design-doc (dict), сохраняется для отладки и будущего переиспользования
+    plot_design: dict | None = None
 
     _LLM_FIELDS: ClassVar[dict[str, str]] = {
         "title": "short, catchy title",
@@ -162,6 +169,50 @@ class Novel(LLMGeneratedModel):
             prompt_variant=prompt_variant,
             **cls.llm_values(data),
         )
+
+
+@dataclass
+class PlotThread:
+    """Нить сюжета: свой двигатель истории и бюджет шагов, которые она ведёт."""
+
+    name: str
+    # имена из каста (1..3)
+    characters: list[str]
+    # минимум и максимум шагов роадмапа, которые ведёт нить (max > min)
+    min_steps: int
+    max_steps: int
+
+
+@dataclass
+class PlotDesign:
+    """Design-doc новеллы: форма истории, нити с бюджетом и опорные точки."""
+
+    # slug из STORY_SHAPES
+    shape: str
+    genres: list[str]
+    through_line: str
+    threads: list[PlotThread]
+    tropes: list[str]
+    pivot: str
+    tone_curve: list[str]
+
+    def render_prompt_block(self) -> str:
+        """Человекочитаемый блок design-doc для roadmap-промпта."""
+        lines = [
+            f"Chosen shape: {self.shape}",
+            f"Genres: {', '.join(self.genres)}",
+            f"Through-line: {self.through_line}",
+            f"Pivot: {self.pivot}",
+            f"Tone curve: {', '.join(self.tone_curve)}",
+            "Threads (budget):",
+        ]
+        for thread in self.threads:
+            lines.append(
+                f"- {thread.name} [{thread.min_steps}..{thread.max_steps} steps] "
+                f"— characters: {', '.join(thread.characters)}"
+            )
+        lines.append(f"Tropes (optional ingredients): {', '.join(self.tropes)}")
+        return "\n".join(lines)
 
 
 @dataclass

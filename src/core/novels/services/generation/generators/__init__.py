@@ -7,6 +7,9 @@ from src.core.novels.services.generation.generators.dialogue_repair import (
     DialogueRepairService,
 )
 from src.core.novels.services.generation.generators.novel import NovelGenerator
+from src.core.novels.services.generation.generators.plot_design import (
+    PlotDesignGenerator,
+)
 from src.core.novels.services.generation.generators.roadmap import RoadmapGenerator
 from src.core.novels.services.generation.generators.scene import SceneGenerator
 from src.core.novels.services.generation.generators.story_context import (
@@ -19,6 +22,7 @@ __all__ = (
     "DialogueGenerator",
     "DialogueRepairService",
     "NovelGenerator",
+    "PlotDesignGenerator",
     "RoadmapGenerator",
     "SceneGenerator",
     "StoryContextGenerator",

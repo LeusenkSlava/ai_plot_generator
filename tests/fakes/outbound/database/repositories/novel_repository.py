@@ -32,6 +32,13 @@ class FakeNovelRepository:
     async def delete(self, novel_id: int) -> None:
         self._items.pop(novel_id, None)
 
+    async def update_plot_design(self, novel_id: int, plot_design: dict) -> None:
+        novel = self._items.get(novel_id)
+        if novel is not None:
+            self._items[novel_id] = dataclasses.replace(
+                novel, plot_design=plot_design
+            )
+
     @property
     def saved(self) -> list[Novel]:
         return list(self._items.values())

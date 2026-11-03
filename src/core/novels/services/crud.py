@@ -106,6 +106,10 @@ class NovelService:
     async def delete(self, novel_id: int) -> None:
         await self._repository.delete(novel_id)
 
+    async def update_plot_design(self, novel_id: int, plot_design: dict) -> None:
+        """Сохраняет снапшот design-doc новеллы (dict для JSONB-колонки)."""
+        await self._repository.update_plot_design(novel_id, plot_design)
+
 
 class DialogueLineService:
     def __init__(self, repository: DialogueLineRepositoryProtocol):

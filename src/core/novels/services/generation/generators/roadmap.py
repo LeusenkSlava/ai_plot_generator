@@ -8,6 +8,7 @@ from src.core.novels.models import (
     Character,
     Novel,
     NovelMode,
+    PlotDesign,
     Prompt,
     PromptKey,
     Roadmap,
@@ -21,8 +22,7 @@ from src.core.novels.services.crud import (
 )
 from src.core.novels.services.generation.generators.base import BaseGenerator
 from src.core.novels.services.generation.prompts.cast import (
-    find_protagonist,
-    render_cast,
+    render_characters_block,
 )
 from src.core.novels.services.generation.prompts.catalog import (
     PromptCatalog,
@@ -31,6 +31,7 @@ from src.core.novels.services.generation.prompts.catalog import (
 from src.core.novels.services.generation.prompts.context import (
     render_place_time_catalog,
 )
+from src.core.novels.services.generation.prompts.shapes import render_shape_block
 from src.core.novels.services.generation.prompts.text import (
     RUSSIAN_OUTPUT_NOTE,
     parse_day,
@@ -71,6 +72,7 @@ class RoadmapGenerator(BaseGenerator):
         novel_id: int,
         *,
         user_prompt: str,
+        design: PlotDesign | None = None,
         step: TransactionFactory = noop_step,
     ) -> list[Roadmap]:
         # 1) Read-фаза: короткая транзакция.
@@ -85,7 +87,7 @@ class RoadmapGenerator(BaseGenerator):
         background_tags = await self.__load_background_tags(novel)
 
         prompt = self.__create_prompt(
-            template, novel, characters, background_tags, user_prompt
+            template, novel, characters, background_tags, user_prompt, design
         )
         data = await self._generate(
             prompt, think=self._think, reasoning_effort=self._reasoning_effort
@@ -124,6 +126,7 @@ class RoadmapGenerator(BaseGenerator):
                 event=(item.get("event") or "").strip(),
                 conflict=(item.get("conflict") or "").strip(),
                 change=(item.get("change") or "").strip(),
+                beat_type=(item.get("beat_type") or "").strip() or None,
                 target_choice=target_choice,
                 choice_stakes=choice_stakes,
                 scenes_count=item["scenes_count"],
@@ -278,6 +281,7 @@ class RoadmapGenerator(BaseGenerator):
                 '      "event": string,\n'
                 '      "conflict": string,\n'
                 '      "change": string,\n'
+                '      "beat_type": string,\n'
                 '      "scenes_count": integer,\n'
                 '      "location_slug": string,\n'
                 '      "time_of_day": string,\n'
@@ -294,6 +298,7 @@ class RoadmapGenerator(BaseGenerator):
             '      "event": string,\n'
             '      "conflict": string,\n'
             '      "change": string,\n'
+            '      "beat_type": string,\n'
             '      "scenes_count": integer,\n'
             '      "location_slug": string,\n'
             '      "time_of_day": string,\n'
@@ -319,6 +324,7 @@ class RoadmapGenerator(BaseGenerator):
         characters: list[Character],
         background_tags: BackgroundTags | None,
         user_prompt: str,
+        design: PlotDesign | None = None,
     ) -> list[dict]:
         interactive = novel.mode == NovelMode.INTERACTIVE
 
@@ -336,16 +342,12 @@ class RoadmapGenerator(BaseGenerator):
                 + render_place_time_catalog(background_tags)
             )
 
-        characters_block = ""
-        if characters:
-            characters_block = f"\nCharacters:\n{render_cast(characters)}"
-            protagonist = find_protagonist(characters)
-            if protagonist:
-                characters_block += (
-                    f"\n\nProtagonist: {protagonist.name} — the protagonist, through whose eyes the story is told. "
-                    f"Their arc: {protagonist.arc}. "
-                    "Build the plot around the protagonist: their goals, decisions, internal conflicts, and relationships."
-                )
+        # Форма и design-doc приходят из plot_design; без него блоки пустые.
+        shape_block = ""
+        design_block = ""
+        if design is not None:
+            shape_block = render_shape_block(design.shape)
+            design_block = design.render_prompt_block()
 
         return render_messages(
             template,
@@ -361,6 +363,8 @@ class RoadmapGenerator(BaseGenerator):
                 "description": novel.description,
                 "tone": novel.tone,
                 "place_time_catalog": place_time_catalog,
-                "characters_block": characters_block,
+                "characters_block": render_characters_block(characters),
+                "shape_block": shape_block,
+                "design_block": design_block,
             },
         )

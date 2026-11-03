@@ -1,10 +1,12 @@
 from datetime import datetime
 
 from src.core.novels.models import (
+    DEFAULT_PROMPT_VARIANT,
     Character,
     DialogueLine,
     LineKind,
     Novel,
+    PromptVariant,
     Roadmap,
     Scene,
 )
@@ -47,6 +49,7 @@ def novel_domain(
     description: str = "Полное описание сюжета...",
     tone: str = "dark",
     universe_id: int | None = None,
+    prompt_variant: PromptVariant = DEFAULT_PROMPT_VARIANT,
 ) -> Novel:
     return Novel(
         id=id,
@@ -57,6 +60,7 @@ def novel_domain(
         description=description,
         tone=tone,
         universe_id=universe_id,
+        prompt_variant=prompt_variant,
     )
 
 

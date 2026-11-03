@@ -1,5 +1,5 @@
 from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.core.novels.models import DEFAULT_PROMPT_VARIANT, LineKind, NovelMode
@@ -52,6 +52,8 @@ class RoadmapModel(BaseModel):
     target_choice: Mapped[bool] = mapped_column(Boolean)
     choice_stakes: Mapped[str | None] = mapped_column(String)
     scenes_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    # тип бита шага: setup|escalation|intimacy|texture|obstacle|reversal|resolution
+    beat_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
     location_slug: Mapped[str | None] = mapped_column(String, nullable=True)
     time_of_day: Mapped[str | None] = mapped_column(String, nullable=True)
     day: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -107,6 +109,8 @@ class NovelModel(BaseModel):
         default=DEFAULT_PROMPT_VARIANT,
         server_default=DEFAULT_PROMPT_VARIANT,
     )
+    # снапшот design-doc (форма + нити + бюджет), см. PlotDesignGenerator
+    plot_design: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     characters: Mapped[list["CharacterModel"]] = relationship(
         "CharacterModel", back_populates="novel", cascade="all, delete-orphan", passive_deletes=True

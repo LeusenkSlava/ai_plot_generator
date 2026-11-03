@@ -20,6 +20,7 @@ from src.core.novels.services.generation.generators import (
     CharacterGenerator,
     DialogueGenerator,
     NovelGenerator,
+    PlotDesignGenerator,
     RoadmapGenerator,
     SceneGenerator,
     StoryContextGenerator,
@@ -113,6 +114,7 @@ def build_novel_domain_services(
 class NovelGenerators:
     novel: NovelGenerator
     character: CharacterGenerator
+    plot_design: PlotDesignGenerator
     roadmap: RoadmapGenerator
     scene: SceneGenerator
     dialogue: DialogueGenerator
@@ -176,6 +178,13 @@ def build_novel_generators(
             generator=generator,
             reasoning_effort=settings.deepseek.CHARACTER_REASONING_EFFORT,
             think=settings.deepseek.CHARACTER_THINK,
+            prompt_catalog=prompt_catalog,
+        ),
+        plot_design=PlotDesignGenerator(
+            novel_service=services.novel,
+            character_service=services.character,
+            # Design-doc — маленький JSON без размышлений: дешёвый вызов на flash.
+            generator=generator,
             prompt_catalog=prompt_catalog,
         ),
         roadmap=RoadmapGenerator(
@@ -258,6 +267,7 @@ def build_generate_novel_use_case(
     composition = NovelCompositionService(
         novel_generator=generators.novel,
         character_generator=generators.character,
+        plot_design_generator=generators.plot_design,
         roadmap_generator=generators.roadmap,
         scene_generator=generators.scene,
         dialogue_generator=generators.dialogue,
