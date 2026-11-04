@@ -53,7 +53,7 @@ async def _wait_until(pred, timeout: float = 2.0) -> None:
 
 
 def test_routing_key_returns_novel_id_for_scene_topic():
-    raw = b'{"job_id": 1, "novel_id": 42, "scene_order": 2}'
+    raw = b'{"job_id": 1, "novel_id": 42, "roadmap_id": 7, "position": 2}'
     assert _routing_key(Topics.SCENE_GENERATE, raw) == 42
 
 

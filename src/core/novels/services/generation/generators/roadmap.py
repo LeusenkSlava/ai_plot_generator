@@ -11,6 +11,7 @@ from src.core.novels.models import (
     PlotDesign,
     Prompt,
     PromptKey,
+    PromptVariant,
     Roadmap,
     RoadmapChoice,
 )
@@ -346,7 +347,8 @@ class RoadmapGenerator(BaseGenerator):
         shape_block = ""
         design_block = ""
         if design is not None:
-            shape_block = render_shape_block(design.shape)
+            adult = novel.prompt_variant != PromptVariant.DEFAULT
+            shape_block = render_shape_block(design.shape, adult=adult)
             design_block = design.render_prompt_block()
 
         return render_messages(

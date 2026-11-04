@@ -14,6 +14,7 @@ from src.core.novels.services.crud import (
 )
 from src.core.novels.services.generation.assets import SceneAssetService
 from src.core.novels.services.generation.generators.dialogue import DialogueGenerator
+from src.core.novels.services.generation.prompts.catalog import PromptCatalog
 from tests.factories import (
     background_domain,
     dialogue_line_domain,
@@ -225,6 +226,7 @@ def sut(
     dialogue_line_service: DialogueLineService,
     codex: FakeCodexService,
     generator: FakeGenerator,
+    prompt_catalog: PromptCatalog,
 ) -> DialogueGenerator:
     return DialogueGenerator(
         novel_service=novel_service,
@@ -234,6 +236,7 @@ def sut(
         dialogue_line_service=dialogue_line_service,
         scene_assets=SceneAssetService(codex),
         generator=generator,
+        prompt_catalog=prompt_catalog,
     )
 
 

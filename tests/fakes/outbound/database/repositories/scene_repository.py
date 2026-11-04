@@ -39,12 +39,17 @@ class FakeSceneRepository:
                 self._items.values(),
                 key=lambda s: (s.order, s.id or 0),
             )
-        step_by_roadmap = {
-            r.id: r.step_id for r in await self._roadmaps.list_by_novel_id(novel_id)
+        order_by_roadmap = {
+            r.id: (r.branch_id, r.depth)
+            for r in await self._roadmaps.list_by_novel_id(novel_id)
         }
         return sorted(
-            (s for s in self._items.values() if s.roadmap_id in step_by_roadmap),
-            key=lambda s: (step_by_roadmap[s.roadmap_id], s.order, s.id or 0),
+            (s for s in self._items.values() if s.roadmap_id in order_by_roadmap),
+            key=lambda s: (
+                *order_by_roadmap[s.roadmap_id],
+                s.order,
+                s.id or 0,
+            ),
         )
 
     async def update_story_context(self, scene_id: int, story_context: str) -> None:

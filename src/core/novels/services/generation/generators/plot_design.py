@@ -16,6 +16,7 @@ from src.core.novels.models import (
     PlotThread,
     Prompt,
     PromptKey,
+    PromptVariant,
 )
 from src.core.novels.services.crud import CharacterService, NovelService
 from src.core.novels.services.generation.generators.base import BaseGenerator
@@ -203,10 +204,11 @@ class PlotDesignGenerator(BaseGenerator):
         characters: list[Character],
         user_prompt: str,
     ) -> list[dict]:
+        adult = novel.prompt_variant != PromptVariant.DEFAULT
         return render_messages(
             template,
             system_vars={
-                "shape_catalog": render_shape_catalog(),
+                "shape_catalog": render_shape_catalog(adult=adult),
                 "russian_note": RUSSIAN_OUTPUT_NOTE,
             },
             user_vars={

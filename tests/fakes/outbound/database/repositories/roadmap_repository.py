@@ -21,7 +21,7 @@ class FakeRoadmapRepository:
     async def list_by_novel_id(self, novel_id: int) -> list[Roadmap]:
         return sorted(
             (r for r in self._items.values() if r.novel_id == novel_id),
-            key=lambda r: r.step_id,
+            key=lambda r: (r.branch_id, r.depth),
         )
 
     async def delete(self, roadmap_id: int) -> None:

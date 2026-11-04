@@ -172,6 +172,34 @@ class TestPlotDesignPrompt:
         assert generator.think_flags == [False]
         assert generator.efforts == [None]
 
+    async def test_default_variant_hides_adult_shapes(self):
+        generator = FakeGenerator().always_returns(_design_payload())
+        novel_repo = FakeNovelRepository()
+        novel = await novel_repo.add(novel_domain(prompt_variant=PromptVariant.DEFAULT))
+        char_repo = FakeCharacterRepository()
+        await char_repo.add(
+            novel_character_domain(novel_id=novel.id, name="Совёнок", is_protagonist=True)
+        )
+        prompts = FakePromptRepository()
+        prompts.set_active(
+            PromptKey.PLOT_DESIGN,
+            PromptVariant.DEFAULT,
+            system_template=_PLOT_DESIGN_SYSTEM,
+            user_template=_PLOT_DESIGN_USER,
+        )
+
+        sut = PlotDesignGenerator(
+            NovelService(novel_repo),
+            CharacterService(char_repo),
+            generator,
+            prompt_catalog=_catalog(prompts),
+        )
+
+        await sut.generate(novel.id, user_prompt="p")
+
+        generator.assert_system_contains("- hero_cycle:")
+        generator.assert_system_not_contains("- erotic_escalation:")
+
 
 class TestPlotDesignResult:
     async def test_returns_parsed_design(self):
@@ -307,6 +335,7 @@ class TestRoadmapWithDesign:
         assert "7. Commitment" in user_prompt
         assert "Chosen shape: relationship_arc" in user_prompt
         assert "- размер/секрет [2..4 steps] — characters: Совёнок" in user_prompt
+        assert "Heat distribution:" in user_prompt
         generator.assert_system_contains("beat_type")
 
     async def test_without_design_blocks_are_empty(self):

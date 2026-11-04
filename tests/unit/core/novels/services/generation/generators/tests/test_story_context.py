@@ -1,4 +1,4 @@
-from src.core.novels.models import Novel, Scene
+from src.core.novels.models import Novel, Prompt, PromptKey, Scene
 from src.core.novels.services.generation.generators.story_context import (
     MAX_KEY_FACTS,
     MAX_USED_PHRASES,
@@ -6,6 +6,20 @@ from src.core.novels.services.generation.generators.story_context import (
     StoryState,
     extract_used_phrases,
 )
+from tests.factories.prompts import STORY_CONTEXT_SYSTEM, STORY_CONTEXT_USER
+
+
+def _template() -> Prompt:
+    return Prompt(
+        id=1,
+        created_at=None,
+        updated_at=None,
+        key=PromptKey.STORY_CONTEXT,
+        variant="default",
+        version=1,
+        system_template=STORY_CONTEXT_SYSTEM,
+        user_template=STORY_CONTEXT_USER,
+    )
 
 
 class TestStoryStateApply:
@@ -140,7 +154,7 @@ class TestStoryContextPrompt:
         )
         gen = StoryContextGenerator.__new__(StoryContextGenerator)
         prompt = gen._StoryContextGenerator__create_prompt(
-            novel, scene, [], [], StoryState()
+            _template(), novel, scene, [], [], StoryState()
         )
 
         content = prompt[0]["content"]

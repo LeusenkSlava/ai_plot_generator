@@ -9,6 +9,12 @@ from tests.fakes.outbound.database.repositories.dialogue_line_repository import 
 from tests.fakes.outbound.database.repositories.novel_repository import (
     FakeNovelRepository,
 )
+from tests.fakes.outbound.database.repositories.player_choice_repository import (
+    FakePlayerChoiceRepository,
+)
+from tests.fakes.outbound.database.repositories.roadmap_choice_repository import (
+    FakeRoadmapChoiceRepository,
+)
 from tests.fakes.outbound.database.repositories.roadmap_repository import (
     FakeRoadmapRepository,
 )
@@ -27,6 +33,8 @@ def _service(scene_repo: FakeSceneRepository | None = None) -> NovelPlaybackServ
         scene_repository=scene_repo or FakeSceneRepository(),
         dialogue_line_repository=FakeDialogueLineRepository(),
         character_repository=FakeCharacterRepository(),
+        roadmap_choice_repository=FakeRoadmapChoiceRepository(),
+        player_choice_repository=FakePlayerChoiceRepository(),
         lock=FakeSceneGenerationLock(),
     )
 

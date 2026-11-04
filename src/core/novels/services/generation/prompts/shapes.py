@@ -17,7 +17,7 @@ class ShapeBeat:
 
 @dataclass(frozen=True)
 class StoryShape:
-    """Нарративная форма: биты по порядку и две заметки по раскладке."""
+    """Нарративная форма: биты по порядку и три заметки по раскладке."""
 
     slug: str
     title: str
@@ -26,6 +26,10 @@ class StoryShape:
     step_note: str
     # распределение конфликтных и тихих/интимных битов
     conflict_note: str
+    # где в этой форме ложатся эротические биты (только для 18+ вариантов)
+    heat_note: str = ""
+    # форма доступна только взрослым вариантам; в default она не попадает в каталог
+    adult_only: bool = False
 
 
 STORY_SHAPES: dict[str, StoryShape] = {
@@ -78,6 +82,10 @@ STORY_SHAPES: dict[str, StoryShape] = {
             "beats 4–6 may stretch over 2 steps."
         ),
         conflict_note="most steps carry a real conflict; the final step resolves.",
+        heat_note=(
+            "erotic beats fit the Search/Find/Take beats (the middle), escalating "
+            "toward the Take; do not front-load them or reserve them all for the Return."
+        ),
     ),
     "relationship_arc": StoryShape(
         slug="relationship_arc",
@@ -121,6 +129,10 @@ STORY_SHAPES: dict[str, StoryShape] = {
             "early beats (1–3) may be quiet/intimate (empty conflict); beats 4–5 carry "
             "the real conflict; beats 6–7 resolve."
         ),
+        heat_note=(
+            "erotic beats live in Attraction/Deepening and peak in Commitment; the "
+            "first intimate beat must land by the Deepening beat, not only in Commitment."
+        ),
     ),
     "slice_of_life": StoryShape(
         slug="slice_of_life",
@@ -152,6 +164,10 @@ STORY_SHAPES: dict[str, StoryShape] = {
         conflict_note=(
             "most steps are quiet/textural (empty conflict); one or two carry light "
             "friction."
+        ),
+        heat_note=(
+            "each episode may carry its own heat; spread the intimate episodes across "
+            "the middle so heat appears from early on, not only in the last episode."
         ),
     ),
     "mystery_unfolding": StoryShape(
@@ -188,6 +204,10 @@ STORY_SHAPES: dict[str, StoryShape] = {
             "stretch over 2 steps."
         ),
         conflict_note="every step carries a risk or a question; the final step resolves.",
+        heat_note=(
+            "heat is optional color; if present, place it on Investigation/False-lead "
+            "steps so it does not wait for the Aftermath."
+        ),
     ),
     "farce": StoryShape(
         slug="farce",
@@ -218,6 +238,10 @@ STORY_SHAPES: dict[str, StoryShape] = {
         step_note="5 beats → 6–10 steps; the escalation may stretch over 2–3 steps.",
         conflict_note=(
             "the conflict is comic and growing, not tragic; the finale resolves it."
+        ),
+        heat_note=(
+            "heat rides the Escalation/Peak steps — the misunderstanding creates erotic "
+            "situations; put the first such beat early in the Escalation."
         ),
     ),
     "rivalry": StoryShape(
@@ -253,6 +277,58 @@ STORY_SHAPES: dict[str, StoryShape] = {
         conflict_note=(
             "the conflict lives in comparison and choice; the final step settles it."
         ),
+        heat_note=(
+            "heat lives in the Bids/Tipping steps (both sides pursue); do not reserve "
+            "it for the Settlement."
+        ),
+    ),
+    "erotic_escalation": StoryShape(
+        slug="erotic_escalation",
+        title="Erotic escalation — discovery/exposure ladder (adult only)",
+        beats=[
+            ShapeBeat(
+                "First exposure",
+                "the protagonist's trait or premise is exposed or noticed for the "
+                "first time (a caught look, a seen moment); the erotic engine starts "
+                "here, on step 1 or 2.",
+            ),
+            ShapeBeat(
+                "Witnesses",
+                "the news spreads or others seek to see it (gossip, peeking, a second "
+                "exposure); each witness is a concrete erotic beat, not a mere mention.",
+            ),
+            ShapeBeat(
+                "Escalation",
+                "a chain of concrete encounters, each more explicit than the previous "
+                "one (the first touch, the first act); each step is its own situation, "
+                "partner or act.",
+            ),
+            ShapeBeat(
+                "Peak",
+                "the most explicit encounter — the act the story has been building "
+                "toward.",
+            ),
+            ShapeBeat(
+                "Aftermath",
+                "the consequences of the peak: what changes between the characters; a "
+                "resolution, not a cliffhanger.",
+            ),
+        ],
+        step_note=(
+            "6–10 steps; the first exposure takes step 1–2, escalations may each take "
+            "a step, the peak lands one step before the end so the aftermath closes "
+            "the story."
+        ),
+        conflict_note=(
+            "the conflict is the tension around exposure (being caught, gossip, "
+            "rivalry), never an obstacle that postpones the act."
+        ),
+        heat_note=(
+            "explicit beats start with the first exposure and escalate on every "
+            "escalation step; the first act must land no later than the second "
+            "escalation, and the peak is the penultimate step."
+        ),
+        adult_only=True,
     ),
 }
 
@@ -264,12 +340,20 @@ def get_shape(slug: str) -> StoryShape:
     return STORY_SHAPES.get((slug or "").strip().lower(), STORY_SHAPES[DEFAULT_SHAPE])
 
 
-def render_shape_catalog() -> str:
-    """Каталог форм для промпта ``plot_design`` (``- slug: title``)."""
-    return "\n".join(f"- {shape.slug}: {shape.title}" for shape in STORY_SHAPES.values())
+def render_shape_catalog(adult: bool = False) -> str:
+    """Каталог форм для промпта ``plot_design`` (``- slug: title``).
+
+    Для обычных вариантов формы с ``adult_only=True`` скрываются.
+    """
+    shapes = [
+        shape
+        for shape in STORY_SHAPES.values()
+        if adult or not shape.adult_only
+    ]
+    return "\n".join(f"- {shape.slug}: {shape.title}" for shape in shapes)
 
 
-def render_shape_block(slug: str) -> str:
+def render_shape_block(slug: str, adult: bool = False) -> str:
     """Полное описание формы для промпта ``roadmap``: биты по порядку и заметки."""
     shape = get_shape(slug)
     lines = [f"Shape: {shape.title}", "Beats (follow in this order):"]
@@ -277,4 +361,6 @@ def render_shape_block(slug: str) -> str:
         lines.append(f"{index}. {beat.name} — {beat.description}")
     lines.append(f"How to spread the beats across steps: {shape.step_note}")
     lines.append(f"Conflict distribution: {shape.conflict_note}")
+    if adult and shape.heat_note:
+        lines.append(f"Heat distribution: {shape.heat_note}")
     return "\n".join(lines)

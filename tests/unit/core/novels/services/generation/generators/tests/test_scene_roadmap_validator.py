@@ -2,7 +2,18 @@ from src.core.novels.models import Roadmap, Scene
 from src.core.novels.services.generation.generators.scene_roadmap_validator import (
     SceneRoadmapValidator,
 )
+from src.core.novels.services.generation.prompts.catalog import PromptCatalog
+from tests.factories.prompts import seed_scene_validator_prompt
 from tests.fakes.outbound.ai.generator import FakeGenerator
+from tests.fakes.outbound.database.repositories.prompt_repository import (
+    FakePromptRepository,
+)
+
+
+def _validator(generator: FakeGenerator) -> SceneRoadmapValidator:
+    prompts = FakePromptRepository()
+    seed_scene_validator_prompt(prompts)
+    return SceneRoadmapValidator(generator, PromptCatalog(prompts))
 
 
 def _roadmap(**fields) -> Roadmap:
@@ -11,7 +22,7 @@ def _roadmap(**fields) -> Roadmap:
         created_at=None,
         updated_at=None,
         novel_id=1,
-        step_id=1,
+        depth=1,
         title="Шаг",
         event="Событие",
         conflict="Конфликт",
@@ -39,7 +50,7 @@ def _scene(**fields) -> Scene:
 class TestDeterministicShortCircuit:
     async def test_location_mismatch_rejected_without_llm(self):
         generator = FakeGenerator()
-        validator = SceneRoadmapValidator(generator)
+        validator = _validator(generator)
         roadmap = _roadmap(location_slug="aidpost")
         scene = _scene(location_slug="beach")
 
@@ -52,7 +63,7 @@ class TestDeterministicShortCircuit:
 
     async def test_day_mismatch_rejected_without_llm(self):
         generator = FakeGenerator()
-        validator = SceneRoadmapValidator(generator)
+        validator = _validator(generator)
         roadmap = _roadmap(day=1)
         scene = _scene(day=2)
 
@@ -66,7 +77,7 @@ class TestDeterministicShortCircuit:
         generator = FakeGenerator().always_returns(
             {"theme_match": True, "location_match": True, "time_match": True, "reason": ""}
         )
-        validator = SceneRoadmapValidator(generator)
+        validator = _validator(generator)
         roadmap = _roadmap(location_slug="aidpost", day=1)
         scene = _scene(location_slug="aidpost", day=1)
 
@@ -80,7 +91,7 @@ class TestDeterministicShortCircuit:
         generator = FakeGenerator().always_returns(
             {"theme_match": True, "location_match": True, "time_match": True, "reason": ""}
         )
-        validator = SceneRoadmapValidator(generator)
+        validator = _validator(generator)
         roadmap = _roadmap()
         scene = _scene(location_slug="beach", day=2)
 
@@ -95,7 +106,7 @@ class TestPromptIncludesPlaceTime:
         generator = FakeGenerator().always_returns(
             {"theme_match": True, "location_match": True, "time_match": True, "reason": ""}
         )
-        validator = SceneRoadmapValidator(generator)
+        validator = _validator(generator)
         roadmap = _roadmap(location_slug="aidpost", time_of_day="day", day=3)
         scene = _scene(location_slug="aidpost", time_of_day="day", day=3)
 

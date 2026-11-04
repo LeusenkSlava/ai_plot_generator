@@ -34,10 +34,19 @@ def _payload(**overrides) -> dict:
 
 class TestShapesLibrary:
     def test_catalog_lists_every_shape(self):
-        catalog = render_shape_catalog()
+        adult_catalog = render_shape_catalog(adult=True)
 
         for slug in STORY_SHAPES:
-            assert f"- {slug}:" in catalog
+            assert f"- {slug}:" in adult_catalog
+
+    def test_catalog_hides_adult_shapes_for_default(self):
+        default_catalog = render_shape_catalog()
+
+        for slug, shape in STORY_SHAPES.items():
+            if shape.adult_only:
+                assert f"- {slug}:" not in default_catalog
+            else:
+                assert f"- {slug}:" in default_catalog
 
     def test_block_keeps_beat_order(self):
         block = render_shape_block("relationship_arc")
@@ -62,6 +71,19 @@ class TestShapesLibrary:
 
     def test_unknown_slug_falls_back_to_default_shape(self):
         assert render_shape_block("no_such_shape") == render_shape_block(DEFAULT_SHAPE)
+
+    def test_block_includes_heat_note_only_for_adult(self):
+        block_default = render_shape_block("relationship_arc")
+        block_adult = render_shape_block("relationship_arc", adult=True)
+
+        assert "Heat distribution:" not in block_default
+        assert "Heat distribution:" in block_adult
+
+    def test_erotic_escalation_is_adult_only(self):
+        shape = STORY_SHAPES["erotic_escalation"]
+
+        assert shape.adult_only is True
+        assert shape.heat_note
 
 
 class TestParseDesign:

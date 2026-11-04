@@ -12,12 +12,17 @@ from src.core.novels.services.generation.generators.scene import SceneGenerator
 from src.core.novels.services.generation.generators.scene_roadmap_validator import (
     SceneRoadmapVerdict,
 )
+from src.core.novels.services.generation.prompts.catalog import PromptCatalog
+from tests.factories.prompts import seed_scene_prompt, seed_scene_validator_prompt
 from tests.fakes.outbound.ai.generator import FakeGenerator
 from tests.fakes.outbound.database.repositories.character_repository import (
     FakeCharacterRepository,
 )
 from tests.fakes.outbound.database.repositories.novel_repository import (
     FakeNovelRepository,
+)
+from tests.fakes.outbound.database.repositories.prompt_repository import (
+    FakePromptRepository,
 )
 from tests.fakes.outbound.database.repositories.roadmap_repository import (
     FakeRoadmapRepository,
@@ -28,12 +33,12 @@ from tests.fakes.outbound.database.repositories.scene_repository import (
 
 
 class _AlwaysMatchValidator:
-    async def validate(self, roadmap, scene, story_context=None):
+    async def validate(self, roadmap, scene, story_context=None, **kwargs):
         return SceneRoadmapVerdict(True, True, True, "")
 
 
 class _AlwaysFailValidator:
-    async def validate(self, roadmap, scene, story_context=None):
+    async def validate(self, roadmap, scene, story_context=None, **kwargs):
         return SceneRoadmapVerdict(False, False, False, "расхождение")
 
 
@@ -43,7 +48,7 @@ class _SequenceValidator:
     def __init__(self, results: list):
         self._results = list(results)
 
-    async def validate(self, roadmap, scene, story_context=None):
+    async def validate(self, roadmap, scene, story_context=None, **kwargs):
         item = self._results.pop(0)
         if isinstance(item, Exception):
             raise item
@@ -99,7 +104,7 @@ async def _build_sut(
             created_at=None,
             updated_at=None,
             novel_id=novel.id,
-            step_id=1,
+            depth=1,
             title="Шаг 1",
             event="Событие шага",
             conflict="Конфликт шага",
@@ -112,6 +117,9 @@ async def _build_sut(
             day=day,
         )
     )
+    prompts = FakePromptRepository()
+    seed_scene_prompt(prompts)
+    seed_scene_validator_prompt(prompts)
     sut = SceneGenerator(
         NovelService(novel_repo),
         RoadmapService(roadmap_repo),
@@ -120,6 +128,7 @@ async def _build_sut(
         generator,
         validator or _AlwaysMatchValidator(),
         max_validation_retries=max_validation_retries,
+        prompt_catalog=PromptCatalog(prompts),
     )
     return sut, roadmap, scene_repo
 
@@ -160,8 +169,8 @@ class TestSceneCast:
         with pytest.raises(GenerationError):
             await sut.generate(roadmap.id)
 
-    async def test_prompt_requests_characters(self):
-        """Промпт сцены требует список участников, а не весь каст."""
+    async def test_prompt_lists_cast(self):
+        """Промпт сцены перечисляет каст, чтобы LLM выбирал участников только из него."""
         generator = FakeGenerator().always_returns(
             {"title": "t", "description": "d", "characters": []}
         )
@@ -170,14 +179,17 @@ class TestSceneCast:
 
         await sut.generate(roadmap.id)
 
-        assert '"characters"' in generator.last_system_prompt
+        user_prompt = generator.last_user_prompt
+        assert "Characters:" in user_prompt
+        assert "Семён" in user_prompt
+        assert "Protagonist: Семён" in user_prompt
 
 
 class _RaisingValidator:
     def __init__(self, error: Exception | None = None):
         self._error = error or GenerationError("validator LLM failed")
 
-    async def validate(self, roadmap, scene, story_context=None):
+    async def validate(self, roadmap, scene, story_context=None, **kwargs):
         raise self._error
 
 

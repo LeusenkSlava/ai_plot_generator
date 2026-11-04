@@ -9,6 +9,8 @@ from src.core.novels.services.crud import (
     RoadmapService,
 )
 from src.core.novels.services.generation.generators.roadmap import RoadmapGenerator
+from src.core.novels.services.generation.prompts.catalog import PromptCatalog
+from tests.factories.prompts import seed_roadmap_prompt
 from tests.fakes.outbound.ai.generator import FakeGenerator
 from tests.fakes.outbound.codex.client import FakeCodexService
 from tests.fakes.outbound.database.repositories.character_repository import (
@@ -16,6 +18,9 @@ from tests.fakes.outbound.database.repositories.character_repository import (
 )
 from tests.fakes.outbound.database.repositories.novel_repository import (
     FakeNovelRepository,
+)
+from tests.fakes.outbound.database.repositories.prompt_repository import (
+    FakePromptRepository,
 )
 from tests.fakes.outbound.database.repositories.roadmap_repository import (
     FakeRoadmapRepository,
@@ -69,12 +74,15 @@ async def _build_sut(
             is_protagonist=True,
         )
     )
+    prompts = FakePromptRepository()
+    seed_roadmap_prompt(prompts)
     sut = RoadmapGenerator(
         NovelService(novel_repo),
         RoadmapService(roadmap_repo),
         CharacterService(char_repo),
         codex,
         generator,
+        prompt_catalog=PromptCatalog(prompts),
     )
     return sut, novel
 
@@ -101,7 +109,7 @@ class TestRoadmapPlaceTime:
         generator = FakeGenerator().always_returns({"roadmap": [_step()]})
         sut, novel = await _build_sut(generator, codex)
 
-        await sut.generate(novel.id)
+        await sut.generate(novel.id, user_prompt="история")
 
         user_prompt = generator.last_user_prompt
         assert "aidpost=Медпункт" in user_prompt
@@ -109,41 +117,38 @@ class TestRoadmapPlaceTime:
         assert "morning=Утро" in user_prompt
         generator.assert_system_contains("location_slug", "time_of_day", "day")
 
-    async def test_system_prompt_constrains_goal_to_cast(self):
-        """event/conflict/change не должны упоминать персонажей вне каста — иначе сцены падают на проверке."""
+    async def test_prompt_receives_cast_block(self):
+        """Каст передаётся в промпт: шаг не должен вводить персонажей вне списка."""
         codex = FakeCodexService()
         codex.add_background_tags(1, _tags())
         generator = FakeGenerator().always_returns({"roadmap": [_step()]})
         sut, novel = await _build_sut(generator, codex)
 
-        await sut.generate(novel.id)
+        await sut.generate(novel.id, user_prompt="история")
 
-        generator.assert_system_contains(
-            "only on the characters from the list",
-            "do not mention in event, conflict, or change",
-        )
+        user_prompt = generator.last_user_prompt
+        assert "Семён" in user_prompt
+        assert "роль" in user_prompt
 
-    async def test_system_prompt_guides_structure(self):
-        """Роадмап должен вести сквозную линию, давать ставки и арки персонажей.
-
-        Структура задаётся кругом Хармана (8 битов).
-        """
+    async def test_prompt_receives_story_shape_and_schema(self):
+        """Линейный режим получает линейную форму истории и схему с полями места/времени."""
         codex = FakeCodexService()
         codex.add_background_tags(1, _tags())
         generator = FakeGenerator().always_returns({"roadmap": [_step()]})
         sut, novel = await _build_sut(generator, codex)
 
-        await sut.generate(novel.id)
+        await sut.generate(novel.id, user_prompt="история")
 
         generator.assert_system_contains(
-            "8 to 12",
-            "Harmon's story circle",
-            "8 beats",
-            "through-line",
-            "turn",
-            "mini-arc",
-            "obstacle",
+            "a sequence of steps that make up a linear story",
+            "location_slug",
+            "time_of_day",
+            '"day"',
         )
+        user_prompt = generator.last_user_prompt
+        assert "Title: Тень" in user_prompt
+        assert "Description: D" in user_prompt
+        assert "Narrative tone: tone" in user_prompt
 
     async def test_parses_place_time_day(self):
         codex = FakeCodexService()
@@ -153,7 +158,7 @@ class TestRoadmapPlaceTime:
         )
         sut, novel = await _build_sut(generator, codex)
 
-        result = await sut.generate(novel.id)
+        result = await sut.generate(novel.id, user_prompt="история")
 
         assert len(result) == 1
         assert result[0].location_slug == "beach"
@@ -169,7 +174,7 @@ class TestRoadmapPlaceTime:
         )
         sut, novel = await _build_sut(generator, codex)
 
-        result = await sut.generate(novel.id)
+        result = await sut.generate(novel.id, user_prompt="история")
 
         assert [r.day for r in result] == [3, 3]
 
@@ -181,7 +186,7 @@ class TestRoadmapPlaceTime:
         )
         sut, novel = await _build_sut(generator, codex)
 
-        result = await sut.generate(novel.id)
+        result = await sut.generate(novel.id, user_prompt="история")
 
         assert [r.day for r in result] == [2, 2]
 
@@ -193,7 +198,7 @@ class TestRoadmapPlaceTime:
         )
         sut, novel = await _build_sut(generator, codex)
 
-        result = await sut.generate(novel.id)
+        result = await sut.generate(novel.id, user_prompt="история")
 
         assert result[0].location_slug is None
         assert result[0].time_of_day is None
@@ -206,7 +211,7 @@ class TestRoadmapWithoutUniverse:
         generator = FakeGenerator().always_returns({"roadmap": [_step()]})
         sut, novel = await _build_sut(generator, codex, universe_id=None)
 
-        result = await sut.generate(novel.id)
+        result = await sut.generate(novel.id, user_prompt="история")
 
         assert codex.calls == []
         assert result[0].location_slug is None
@@ -220,4 +225,4 @@ class TestRoadmapWithoutUniverse:
         sut, novel = await _build_sut(generator, codex)
 
         with pytest.raises(GenerationError, match="background tags"):
-            await sut.generate(novel.id)
+            await sut.generate(novel.id, user_prompt="история")
