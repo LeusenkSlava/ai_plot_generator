@@ -22,8 +22,11 @@ class ChooseOutcome(StrEnum):
 class ChooseOptionUseCase:
     """Зафиксировать выбор игрока на развилке.
 
-    Записывает вариант в журнал ``player_choices`` (идемпотентно) и сообщает, нужно
-    ли лениво генерировать альтернативную ветку (у форка next_roadmap_id ещё NULL).
+    Записывает вариант в журнал ``player_choices`` и сообщает, нужно ли лениво
+    генерировать альтернативную ветку (у форка next_roadmap_id ещё NULL).
+
+    Повторный POST того же варианта идемпотентен. Новый выбор на той же развилке
+    (перепрохождение) заменяет прежний: путь игрока строится по последнему выбору.
     """
 
     def __init__(
@@ -61,6 +64,10 @@ class ChooseOptionUseCase:
             existing = await self._player_choices.get_by_roadmap_choice(
                 roadmap_choice_id
             )
+            if roadmap.id is not None:
+                await self._clear_other_choices(
+                    novel_id, roadmap.id, roadmap_choice_id
+                )
             if existing is None:
                 await self._player_choices.add(
                     PlayerChoice(
@@ -76,3 +83,24 @@ class ChooseOptionUseCase:
         if choice.next_roadmap_id is not None:
             return ChooseOutcome.OK
         return ChooseOutcome.NEED_BRANCH_GENERATION
+
+    async def _clear_other_choices(
+        self, novel_id: int, roadmap_id: int, keep_choice_id: int
+    ) -> None:
+        """Оставить на развилке только текущий вариант.
+
+        Перепрохождение новеллы может выбрать другой вариант, а путь строится по
+        последнему выбору. Без очистки старые записи остаются в журнале, и при
+        повторном выборе ранее выбранного варианта сервер не замечает смену ветки.
+        """
+        roadmap_by_choice = {
+            choice.id: choice.roadmap_id
+            for choice in await self._choices.list_by_novel(novel_id)
+        }
+        for player_choice in await self._player_choices.list_by_novel(novel_id):
+            if roadmap_by_choice.get(player_choice.roadmap_choice_id) != roadmap_id:
+                continue
+            if player_choice.roadmap_choice_id == keep_choice_id:
+                continue
+            if player_choice.id is not None:
+                await self._player_choices.delete(player_choice.id)

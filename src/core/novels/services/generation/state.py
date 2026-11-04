@@ -129,6 +129,27 @@ def _iter_path_steps(
             current = kids[0] if kids else None
 
 
+def played_path_scenes(
+    roadmaps: list[Roadmap],
+    scenes: list[Scene],
+    choices: list[RoadmapChoice],
+    player_choices: list[PlayerChoice],
+) -> list[Scene]:
+    """Сцены сыгранного пути в порядке проигрывания.
+
+    Путь один на новеллу: от корня по последним зафиксированным выборам игрока.
+    Проигрывание должно идти по нему, а не по плоскому списку реплик новеллы:
+    иначе после повторного выбора сервер отдаёт реплики ранее пройденной ветки.
+    """
+    return [
+        scene
+        for _, step_scenes in _iter_path_steps(
+            roadmaps, scenes, choices, player_choices
+        )
+        for scene in step_scenes
+    ]
+
+
 def resolve_next_slot(
     roadmaps: list[Roadmap],
     scenes: list[Scene],

@@ -17,8 +17,16 @@ from src.core.novels.interfaces.repository import (
     RoadmapRepositoryProtocol,
     SceneRepositoryProtocol,
 )
-from src.core.novels.models import Character, DialogueLine, RoadmapChoice, Scene
+from src.core.novels.models import (
+    Character,
+    DialogueLine,
+    PlayerChoice,
+    Roadmap,
+    RoadmapChoice,
+    Scene,
+)
 from src.core.novels.services.generation.state import (
+    played_path_scenes,
     resolve_incomplete_scene_slot,
     resolve_next_slot,
     scene_ids_with_lines,
@@ -78,7 +86,7 @@ class NovelPlaybackService:
         self._lock = lock
 
     async def next(self, novel_id: int, dialogue_line_id: int | None) -> PlaybackResult:
-        """Следующая реплика за dialogue_line_id.
+        """Следующая реплика сыгранного пути за dialogue_line_id.
 
         dialogue_line_id=None — начать с начала новеллы.
         Если реплики кончились — вернуть статус finished / need_generation / generating.
@@ -86,10 +94,25 @@ class NovelPlaybackService:
         if await self._novels.get_by_id(novel_id) is None:
             raise NovelNotFoundError(novel_id)
 
-        lines = await self._dialogue_lines.list_by_novel_id(novel_id)
-        lines = await self._exclude_review_lines(novel_id, lines)
+        roadmaps = await self._roadmaps.list_by_novel_id(novel_id)
+        scenes = await self._scenes.list_by_novel_id(novel_id)
+        choices = await self._roadmap_choices.list_by_novel_id(novel_id)
+        player_choices = await self._player_choices.list_by_novel_id(novel_id)
+        lines = await self._lines_on_path(
+            novel_id, roadmaps, scenes, choices, player_choices
+        )
 
-        index = self._resolve_index(lines, dialogue_line_id)
+        try:
+            index = self._resolve_index(lines, dialogue_line_id)
+        except DialogueLineNotFoundError:
+            # Сохранённый клиентом offset может относиться к ветке, которую он
+            # только что сменил повторным выбором. Реплика существует, но не на
+            # текущем пути — начинаем чтение заново, а не отдаём 404.
+            if dialogue_line_id is None:
+                raise
+            if await self._dialogue_lines.get_by_id(dialogue_line_id) is None:
+                raise
+            index = 0
 
         if index < len(lines):
             line = lines[index]
@@ -103,7 +126,36 @@ class NovelPlaybackService:
                 )
             return PlaybackResult(status=PlaybackStatus.OK, step=step)
 
-        return await self._resolve_tail_status(novel_id, lines)
+        return await self._resolve_tail_status(
+            novel_id, lines, roadmaps, scenes, choices, player_choices
+        )
+
+    async def _lines_on_path(
+        self,
+        novel_id: int,
+        roadmaps: list[Roadmap],
+        scenes: list[Scene],
+        choices: list[RoadmapChoice],
+        player_choices: list[PlayerChoice],
+    ) -> list[DialogueLine]:
+        """Реплики сцен сыгранного пути в порядке проигрывания.
+
+        Плоский ``list_by_novel_id`` смешивает ветки: после точки выбора в нём
+        сначала идут реплики ранее пройденной ветки (``branch_id``/``depth``),
+        поэтому игрок снова попадал в неё, какой бы вариант ни выбрал.
+        """
+        path_scenes = played_path_scenes(
+            roadmaps, scenes, choices, player_choices
+        )
+        lines_by_scene: dict[int, list[DialogueLine]] = {}
+        for line in await self._dialogue_lines.list_by_novel_id(novel_id):
+            lines_by_scene.setdefault(line.scene_id, []).append(line)
+        return [
+            line
+            for scene in path_scenes
+            if scene.id is not None
+            for line in lines_by_scene.get(scene.id, [])
+        ]
 
     async def _exclude_review_lines(
         self, novel_id: int, lines: list[DialogueLine]
@@ -139,13 +191,14 @@ class NovelPlaybackService:
         return roadmap is not None and roadmap.target_choice
 
     async def _resolve_tail_status(
-        self, novel_id: int, lines: list[DialogueLine]
+        self,
+        novel_id: int,
+        lines: list[DialogueLine],
+        roadmaps: list[Roadmap],
+        scenes: list[Scene],
+        choices: list[RoadmapChoice],
+        player_choices: list[PlayerChoice],
     ) -> PlaybackResult:
-        roadmaps = await self._roadmaps.list_by_novel_id(novel_id)
-        scenes = await self._scenes.list_by_novel_id(novel_id)
-        choices = await self._roadmap_choices.list_by_novel_id(novel_id)
-        player_choices = await self._player_choices.list_by_novel_id(novel_id)
-
         # Сцена коммитится до генерации диалога, поэтому шаг бывает уже закрыт по
         # числу сцен, пока реплик нет. Ждём именно эту сцену, а не отдаём финал.
         slot = resolve_incomplete_scene_slot(
