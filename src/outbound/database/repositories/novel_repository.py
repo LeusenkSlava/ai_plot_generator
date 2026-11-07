@@ -1,4 +1,6 @@
-from sqlalchemy import func, select
+from datetime import UTC, datetime
+
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.novels.models import (
@@ -244,6 +246,8 @@ class NovelRepository:
             universe_id=novel.universe_id,
             author_id=novel.author_id,
             mode=novel.mode,
+            is_published=novel.is_published,
+            published_at=novel.published_at,
             prompt_variant=novel.prompt_variant,
             plot_design=novel.plot_design,
         )
@@ -262,6 +266,29 @@ class NovelRepository:
         statement = select(NovelModel).where(NovelModel.id == novel_id)
         if author_id is not None:
             statement = statement.where(NovelModel.author_id == author_id)
+        result = await self._session.execute(statement)
+        db_novel = result.scalar_one_or_none()
+        return self._to_domain(db_novel) if db_novel else None
+
+    async def get_visible(
+        self, novel_id: int, author_id: int | None = None
+    ) -> Novel | None:
+        """Новелла, доступная читателю: опубликованная или своя.
+
+        ``author_id=None`` — анонимный читатель, ему видны только опубликованные
+        новеллы. Чужая неопубликованная новелла неотличима от несуществующей
+        (``None`` → 404 у роутера), чтобы не раскрывать сам факт её существования.
+        """
+        statement = select(NovelModel).where(NovelModel.id == novel_id)
+        if author_id is None:
+            statement = statement.where(NovelModel.is_published.is_(True))
+        else:
+            statement = statement.where(
+                or_(
+                    NovelModel.author_id == author_id,
+                    NovelModel.is_published.is_(True),
+                )
+            )
         result = await self._session.execute(statement)
         db_novel = result.scalar_one_or_none()
         return self._to_domain(db_novel) if db_novel else None
@@ -288,6 +315,44 @@ class NovelRepository:
         result = await self._session.execute(statement)
         return result.scalar_one()
 
+    async def list_visible(
+        self, limit: int, offset: int, author_id: int | None = None
+    ) -> list[Novel]:
+        """Доступные читателю новеллы: опубликованные + собственные."""
+        statement = select(NovelModel)
+        if author_id is None:
+            statement = statement.where(NovelModel.is_published.is_(True))
+        else:
+            statement = statement.where(
+                or_(
+                    NovelModel.author_id == author_id,
+                    NovelModel.is_published.is_(True),
+                )
+            )
+        result = await self._session.execute(
+            statement.order_by(
+                NovelModel.created_at.desc(), NovelModel.id.desc()
+            )
+            .limit(limit)
+            .offset(offset)
+        )
+        return [self._to_domain(n) for n in result.scalars().all()]
+
+    async def count_visible(self, author_id: int | None = None) -> int:
+        """Количество новелл в выборке :meth:`list_visible`."""
+        statement = select(func.count()).select_from(NovelModel)
+        if author_id is None:
+            statement = statement.where(NovelModel.is_published.is_(True))
+        else:
+            statement = statement.where(
+                or_(
+                    NovelModel.author_id == author_id,
+                    NovelModel.is_published.is_(True),
+                )
+            )
+        result = await self._session.execute(statement)
+        return result.scalar_one()
+
     async def delete(
         self, novel_id: int, author_id: int | None = None
     ) -> bool:
@@ -307,6 +372,30 @@ class NovelRepository:
         await self._session.delete(db_novel)
         return True
 
+    async def set_published(
+        self, novel_id: int, author_id: int, is_published: bool
+    ) -> Novel | None:
+        """Опубликовать новеллу или снять с публикации (только автор).
+
+        ``None`` — новеллы нет или она чужая: роутер отдаёт 404. Повторная
+        публикация не сдвигает ``published_at``, снятие — очищает.
+        """
+        statement = select(NovelModel).where(
+            NovelModel.id == novel_id, NovelModel.author_id == author_id
+        )
+        db_novel = (
+            await self._session.execute(statement)
+        ).scalar_one_or_none()
+        if db_novel is None:
+            return None
+        db_novel.is_published = is_published
+        if not is_published:
+            db_novel.published_at = None
+        elif db_novel.published_at is None:
+            db_novel.published_at = datetime.now(UTC)
+        await self._session.flush()
+        return self._to_domain(db_novel)
+
     async def update_plot_design(self, novel_id: int, plot_design: dict) -> None:
         """Сохраняет снапшот design-doc новеллы (колонка JSONB)."""
         db_novel = await self._session.get(NovelModel, novel_id)
@@ -325,6 +414,8 @@ class NovelRepository:
             universe_id=db_novel.universe_id,
             author_id=db_novel.author_id,
             mode=db_novel.mode,
+            is_published=db_novel.is_published,
+            published_at=db_novel.published_at,
             prompt_variant=PromptVariant(db_novel.prompt_variant),
             plot_design=db_novel.plot_design,
             created_at=db_novel.created_at,

@@ -1,4 +1,6 @@
-from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
+from datetime import datetime
+
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -100,6 +102,17 @@ class NovelModel(BaseModel):
     # id учётки в my_choice_api (связь «по соглашению», без FK между БД).
     author_id: Mapped[int | None] = mapped_column(
         Integer, nullable=True, index=True
+    )
+    # Публикация: опубликованную новеллу читают все, в том числе без авторизации.
+    is_published: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+        index=True,
+    )
+    published_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
     mode: Mapped[NovelMode] = mapped_column(
         pg_enum(NovelMode, native=False),

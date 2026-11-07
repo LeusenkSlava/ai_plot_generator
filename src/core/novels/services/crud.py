@@ -97,23 +97,44 @@ class NovelService:
     async def get(
         self, novel_id: int, author_id: int | None = None
     ) -> Novel | None:
-        """Новелла; при ``author_id`` чужая неотличима от несуществующей."""
+        """Новелла без проверки публикации — для внутренних вызовов движка."""
         novel = await self._repository.get_by_id(novel_id, author_id)
         return novel
+
+    async def get_visible(
+        self, novel_id: int, author_id: int | None = None
+    ) -> Novel | None:
+        """Новелла, доступная читателю: опубликованная или своя.
+
+        ``author_id=None`` — аноним: видны только опубликованные новеллы.
+        """
+        return await self._repository.get_visible(novel_id, author_id)
 
     async def list(
         self, limit: int, offset: int, author_id: int | None = None
     ) -> tuple[list[Novel], int]:
-        novels = await self._repository.list_all(
+        """Доступные читателю новеллы: опубликованные + собственные.
+
+        Без автора (``author_id=None``) — публичный каталог.
+        """
+        novels = await self._repository.list_visible(
             limit=limit, offset=offset, author_id=author_id
         )
-        total = await self._repository.count(author_id)
+        total = await self._repository.count_visible(author_id)
         return novels, total
 
     async def delete(
         self, novel_id: int, author_id: int | None = None
     ) -> bool:
         return await self._repository.delete(novel_id, author_id)
+
+    async def set_published(
+        self, novel_id: int, author_id: int, is_published: bool
+    ) -> Novel | None:
+        """Публикация/снятие с публикации; ``None`` — чужая или несуществующая."""
+        return await self._repository.set_published(
+            novel_id, author_id, is_published
+        )
 
     async def update_plot_design(self, novel_id: int, plot_design: dict) -> None:
         """Сохраняет снапшот design-doc новеллы (dict для JSONB-колонки)."""

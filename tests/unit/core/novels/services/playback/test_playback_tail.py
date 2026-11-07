@@ -33,6 +33,16 @@ class _ByNovelRepo:
             return None
         return item
 
+    async def get_visible(self, item_id: int, author_id: int | None = None):
+        item = next((i for i in self.items if i.id == item_id), None)
+        if item is None:
+            return None
+        if getattr(item, "is_published", False):
+            return item
+        if author_id is not None and getattr(item, "author_id", None) == author_id:
+            return item
+        return None
+
     async def list_by_novel_id(self, novel_id: int):
         return [i for i in self.items if i.novel_id == novel_id]
 
@@ -105,6 +115,7 @@ def _novel() -> Novel:
         public_description="",
         description="",
         tone="",
+        is_published=True,
     )
 
 

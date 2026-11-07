@@ -93,11 +93,13 @@ class NovelPlaybackService:
     ) -> PlaybackResult:
         """Следующая реплика сыгранного пути за dialogue_line_id.
 
-        dialogue_line_id=None — начать с начала новеллы. ``author_id`` сужает
-        доступ до библиотеки автора: чужая новелла — ``NovelNotFoundError``.
+        dialogue_line_id=None — начать с начала новеллы. ``author_id=None`` —
+        анонимный читатель: доступны только опубликованные новеллы; автору
+        дополнительно доступны собственные. Чужая неопубликованная новелла —
+        ``NovelNotFoundError``.
         Если реплики кончились — вернуть статус finished / need_generation / generating.
         """
-        if await self._novels.get_by_id(novel_id, author_id) is None:
+        if await self._novels.get_visible(novel_id, author_id) is None:
             raise NovelNotFoundError(novel_id)
 
         roadmaps = await self._roadmaps.list_by_novel_id(novel_id)

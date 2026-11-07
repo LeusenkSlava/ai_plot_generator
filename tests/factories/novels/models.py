@@ -50,6 +50,8 @@ def novel_domain(
     tone: str = "dark",
     universe_id: int | None = None,
     author_id: int | None = None,
+    is_published: bool = False,
+    published_at: datetime | None = None,
     prompt_variant: PromptVariant = DEFAULT_PROMPT_VARIANT,
 ) -> Novel:
     return Novel(
@@ -62,6 +64,8 @@ def novel_domain(
         tone=tone,
         universe_id=universe_id,
         author_id=author_id,
+        is_published=is_published,
+        published_at=published_at,
         prompt_variant=prompt_variant,
     )
 

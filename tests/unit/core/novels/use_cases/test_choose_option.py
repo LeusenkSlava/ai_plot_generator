@@ -53,7 +53,7 @@ def _choice(
 
 async def _setup():
     novels = FakeNovelRepository()
-    novel = await novels.add(novel_domain())
+    novel = await novels.add(novel_domain(is_published=True))
 
     roadmaps = FakeRoadmapRepository()
     fork = await roadmaps.add(roadmap_domain(target_choice=True))

@@ -15,6 +15,7 @@ from src.inbound.http.novels.dependencies import (
     get_author_id,
     get_novel_playback_service,
     get_novel_service,
+    get_optional_author_id,
 )
 from src.inbound.http.novels.schemas import (
     ChooseRequest,
@@ -35,9 +36,43 @@ router = APIRouter(prefix="/novels", tags=["novels"])
 async def get_novel(
     novel_id: int,
     service: Annotated[NovelService, Depends(get_novel_service)],
+    author_id: Annotated[int | None, Depends(get_optional_author_id)],
+):
+    """Карточка новеллы.
+
+    Опубликованная новелла доступна без заголовка ``X-User-Id``; неопубликованная
+    — только её автору (для остальных неотличима от несуществующей, 404).
+    """
+    novel = await service.get_visible(novel_id, author_id)
+    if novel is None:
+        raise HTTPException(status_code=404, detail="Novel not found")
+    return novel
+
+
+@router.post("/{novel_id}/publish", response_model=NovelResponse)
+async def publish_novel(
+    novel_id: int,
+    service: Annotated[NovelService, Depends(get_novel_service)],
     author_id: Annotated[int, Depends(get_author_id)],
 ):
-    novel = await service.get(novel_id, author_id)
+    """Опубликовать новеллу. Доступно только автору.
+
+    После публикации новеллу читают все, в том числе без авторизации.
+    """
+    novel = await service.set_published(novel_id, author_id, is_published=True)
+    if novel is None:
+        raise HTTPException(status_code=404, detail="Novel not found")
+    return novel
+
+
+@router.delete("/{novel_id}/publish", response_model=NovelResponse)
+async def unpublish_novel(
+    novel_id: int,
+    service: Annotated[NovelService, Depends(get_novel_service)],
+    author_id: Annotated[int, Depends(get_author_id)],
+):
+    """Снять новеллу с публикации. Доступно только автору."""
+    novel = await service.set_published(novel_id, author_id, is_published=False)
     if novel is None:
         raise HTTPException(status_code=404, detail="Novel not found")
     return novel
@@ -51,12 +86,13 @@ async def get_novel(
 async def start_novel(
     novel_id: int,
     service: Annotated[NovelPlaybackService, Depends(get_novel_playback_service)],
-    author_id: Annotated[int, Depends(get_author_id)],
+    author_id: Annotated[int | None, Depends(get_optional_author_id)],
     offset: int | None = None,
 ):
     """offset — id последней показанной реплики; без него новелла начинается с начала.
 
-    Только читает из БД, LLM не вызывает. status:
+    Только читает из БД, LLM не вызывает. Опубликованная новелла доступна без
+    заголовка ``X-User-Id``. status:
     - ok — следующая реплика в step;
     - choice — текущая реплика — точка выбора (в choices варианты);
     - need_generation — реплики кончились, нужно отправить в ai_plot.scene.generate
@@ -87,13 +123,16 @@ async def start_novel(
 async def choose_option(
     novel_id: int,
     body: Annotated[ChooseRequest, Body(...)],
-    author_id: Annotated[int, Depends(get_author_id)],
+    author_id: Annotated[int | None, Depends(get_optional_author_id)],
 ):
     """Фиксирует выбор игрока на развилке.
 
     Возвращает ok, если продолжение уже готово (истинный вариант или уже
     сгенерированная ветка), либо need_branch_generation — тогда клиент отправляет
     в ai_plot.branch.generate команду генерации ветки.
+
+    Опубликованная новелла доступна без заголовка ``X-User-Id``; догенерацию
+    ветки шлюз разрешает только авторизованным.
     """
     async with get_session_scope() as session:
         use_case = build_choose_option_use_case(session)
@@ -115,10 +154,15 @@ async def choose_option(
 @router.get("/", response_model=NovelListResponse)
 async def list_novels(
     service: Annotated[NovelService, Depends(get_novel_service)],
-    author_id: Annotated[int, Depends(get_author_id)],
+    author_id: Annotated[int | None, Depends(get_optional_author_id)],
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0)] = 0,
 ):
+    """Доступные читателю новеллы.
+
+    Без заголовка ``X-User-Id`` — публичный каталог: только опубликованные.
+    С заголовком — опубликованные и собственные новеллы автора.
+    """
     novels, total = await service.list(
         limit=limit, offset=offset, author_id=author_id
     )

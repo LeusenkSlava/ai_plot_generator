@@ -141,6 +141,10 @@ class Novel(LLMGeneratedModel):
     # id пользователя в my_choice_api; этот сервис знает только opaque int.
     author_id: int | None = None
     mode: NovelMode = NovelMode.LINEAR
+    # Публикация: опубликованную новеллу может читать кто угодно, в том числе
+    # без авторизации. Публикует только автор.
+    is_published: bool = False
+    published_at: datetime | None = None
 
     prompt_variant: PromptVariant = DEFAULT_PROMPT_VARIANT
     # снапшот design-doc (dict), сохраняется для отладки и будущего переиспользования

@@ -24,6 +24,9 @@ class NovelResponse(BaseModel):
     universe_id: int | None
     # id автора в my_choice_api; шлюз обогащает ответ подписью автора.
     author_id: int | None
+    # Публикация: опубликованную новеллу читают все, в том числе без авторизации.
+    is_published: bool = False
+    published_at: datetime | None = None
     mode: NovelMode
     prompt_variant: PromptVariant
 

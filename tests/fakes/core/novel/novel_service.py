@@ -19,19 +19,31 @@ class FakeNovelService:
     ) -> Novel | None:
         return await self._repository.get_by_id(novel_id, author_id)
 
+    async def get_visible(
+        self, novel_id: int, author_id: int | None = None
+    ) -> Novel | None:
+        return await self._repository.get_visible(novel_id, author_id)
+
     async def list(
         self, limit: int, offset: int, author_id: int | None = None
     ) -> tuple[list[Novel], int]:
-        items = await self._repository.list_all(
+        items = await self._repository.list_visible(
             limit=limit, offset=offset, author_id=author_id
         )
-        total = await self._repository.count(author_id)
+        total = await self._repository.count_visible(author_id)
         return items, total
 
     async def delete(
         self, novel_id: int, author_id: int | None = None
     ) -> bool:
         return await self._repository.delete(novel_id, author_id)
+
+    async def set_published(
+        self, novel_id: int, author_id: int, is_published: bool
+    ) -> Novel | None:
+        return await self._repository.set_published(
+            novel_id, author_id, is_published
+        )
 
     # ---------- удобства для тестов ----------
 

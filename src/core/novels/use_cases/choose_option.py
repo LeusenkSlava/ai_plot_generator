@@ -51,7 +51,7 @@ class ChooseOptionUseCase:
         author_id: int | None = None,
     ) -> ChooseOutcome:
         async with step():
-            if await self._novels.get_by_id(novel_id, author_id) is None:
+            if await self._novels.get_visible(novel_id, author_id) is None:
                 raise NovelNotFoundError(novel_id)
 
             choice = await self._choices.get(roadmap_choice_id)

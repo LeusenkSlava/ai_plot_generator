@@ -29,6 +29,20 @@ from src.outbound.database.repositories.novel_repository import (
 )
 
 
+def get_optional_author_id(
+    x_user_id: Annotated[int | None, Header(alias="X-User-Id")] = None,
+) -> int | None:
+    """Автор запроса, если шлюз его передал; иначе анонимный читатель.
+
+    JWT проверяет ``my_choice_api``: отсутствие заголовка означает анонимный
+    запрос, которому видны только опубликованные новеллы. Невалидный
+    (неположительный) заголовок — ошибка конфигурации шлюза, отказываем.
+    """
+    if x_user_id is not None and x_user_id < 1:
+        raise HTTPException(status_code=401, detail="UNAUTHORIZED")
+    return x_user_id
+
+
 def get_author_id(
     x_user_id: Annotated[int | None, Header(alias="X-User-Id")] = None,
 ) -> int:
