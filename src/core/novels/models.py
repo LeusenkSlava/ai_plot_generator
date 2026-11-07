@@ -138,6 +138,8 @@ class Novel(LLMGeneratedModel):
     description: str
     tone: str
     universe_id: int | None = None
+    # id пользователя в my_choice_api; этот сервис знает только opaque int.
+    author_id: int | None = None
     mode: NovelMode = NovelMode.LINEAR
 
     prompt_variant: PromptVariant = DEFAULT_PROMPT_VARIANT
@@ -157,6 +159,7 @@ class Novel(LLMGeneratedModel):
         data: dict,
         *,
         universe_id: int | None = None,
+        author_id: int | None = None,
         mode: NovelMode = NovelMode.LINEAR,
         prompt_variant: PromptVariant = DEFAULT_PROMPT_VARIANT,
     ) -> "Novel":
@@ -165,6 +168,7 @@ class Novel(LLMGeneratedModel):
             created_at=None,
             updated_at=None,
             universe_id=universe_id,
+            author_id=author_id,
             mode=mode,
             prompt_variant=prompt_variant,
             **cls.llm_values(data),

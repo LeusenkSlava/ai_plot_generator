@@ -60,6 +60,7 @@ class NovelCompositionService:
         universe_id: int | None = None,
         mode: NovelMode = NovelMode.LINEAR,
         prompt_variant: str = DEFAULT_PROMPT_VARIANT,
+        author_id: int | None = None,
         *,
         step: TransactionFactory,
     ) -> Novel:
@@ -78,6 +79,7 @@ class NovelCompositionService:
                     universe_id=universe_id,
                     mode=mode,
                     prompt_variant=prompt_variant,
+                    author_id=author_id,
                     step=step,
                 )
                 trace.bind(novel.id)

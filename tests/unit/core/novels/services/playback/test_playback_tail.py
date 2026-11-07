@@ -25,8 +25,13 @@ class _ByNovelRepo:
     def __init__(self, items=()):
         self.items = list(items)
 
-    async def get_by_id(self, item_id: int):
-        return next((i for i in self.items if i.id == item_id), None)
+    async def get_by_id(self, item_id: int, author_id: int | None = None):
+        item = next((i for i in self.items if i.id == item_id), None)
+        if item is None:
+            return None
+        if author_id is not None and getattr(item, "author_id", None) != author_id:
+            return None
+        return item
 
     async def list_by_novel_id(self, novel_id: int):
         return [i for i in self.items if i.novel_id == novel_id]

@@ -190,6 +190,31 @@ class TestLLMInteraction:
 
 
 # ---------------------------------------------------------------------------
+# Автор новеллы
+# ---------------------------------------------------------------------------
+
+
+class TestGenerateAuthor:
+    async def test_author_id_saved_into_novel(self, sut, novel_service):
+        result = await sut.generate(user_prompt="x", author_id=7)
+
+        assert result.author_id == 7
+        assert novel_service.saved[0].author_id == 7
+
+    async def test_author_id_is_not_hardcoded(self, sut, novel_service):
+        await sut.generate(user_prompt="x", author_id=7)
+        await sut.generate(user_prompt="y", author_id=42)
+
+        assert [novel.author_id for novel in novel_service.saved] == [7, 42]
+
+    async def test_missing_author_id_kept_none(self, sut, novel_service):
+        result = await sut.generate(user_prompt="x")
+
+        assert result.author_id is None
+        assert novel_service.saved[0].author_id is None
+
+
+# ---------------------------------------------------------------------------
 # Обработка ошибок
 # ---------------------------------------------------------------------------
 

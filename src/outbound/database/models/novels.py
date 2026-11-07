@@ -97,6 +97,10 @@ class NovelModel(BaseModel):
     description: Mapped[str] = mapped_column(String, nullable=False)
     tone: Mapped[str] = mapped_column(String, nullable=False)
     universe_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # id учётки в my_choice_api (связь «по соглашению», без FK между БД).
+    author_id: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, index=True
+    )
     mode: Mapped[NovelMode] = mapped_column(
         pg_enum(NovelMode, native=False),
         nullable=False,

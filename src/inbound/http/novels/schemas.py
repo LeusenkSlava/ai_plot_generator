@@ -22,6 +22,8 @@ class NovelResponse(BaseModel):
     description: str
     tone: str
     universe_id: int | None
+    # id автора в my_choice_api; шлюз обогащает ответ подписью автора.
+    author_id: int | None
     mode: NovelMode
     prompt_variant: PromptVariant
 

@@ -49,6 +49,7 @@ def novel_domain(
     description: str = "Полное описание сюжета...",
     tone: str = "dark",
     universe_id: int | None = None,
+    author_id: int | None = None,
     prompt_variant: PromptVariant = DEFAULT_PROMPT_VARIANT,
 ) -> Novel:
     return Novel(
@@ -60,6 +61,7 @@ def novel_domain(
         description=description,
         tone=tone,
         universe_id=universe_id,
+        author_id=author_id,
         prompt_variant=prompt_variant,
     )
 

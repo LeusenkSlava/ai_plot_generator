@@ -48,6 +48,7 @@ class NovelGenerator(BaseGenerator):
         universe_id: int | None = None,
         mode: NovelMode = NovelMode.LINEAR,
         prompt_variant: str = DEFAULT_PROMPT_VARIANT,
+        author_id: int | None = None,
         *,
         step: TransactionFactory = noop_step,
     ) -> Novel:
@@ -67,6 +68,7 @@ class NovelGenerator(BaseGenerator):
         novel = Novel.from_llm(
             data,
             universe_id=universe_id,
+            author_id=author_id,
             mode=mode,
             prompt_variant=prompt_variant,
         )

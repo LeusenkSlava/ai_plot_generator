@@ -94,17 +94,26 @@ class NovelService:
         novel = await self._repository.add(novel)
         return novel
 
-    async def get(self, novel_id: int) -> Novel | None:
-        novel = await self._repository.get_by_id(novel_id)
+    async def get(
+        self, novel_id: int, author_id: int | None = None
+    ) -> Novel | None:
+        """Новелла; при ``author_id`` чужая неотличима от несуществующей."""
+        novel = await self._repository.get_by_id(novel_id, author_id)
         return novel
 
-    async def list(self, limit: int, offset: int) -> tuple[list[Novel], int]:
-        novels = await self._repository.list_all(limit=limit, offset=offset)
-        total = await self._repository.count()
+    async def list(
+        self, limit: int, offset: int, author_id: int | None = None
+    ) -> tuple[list[Novel], int]:
+        novels = await self._repository.list_all(
+            limit=limit, offset=offset, author_id=author_id
+        )
+        total = await self._repository.count(author_id)
         return novels, total
 
-    async def delete(self, novel_id: int) -> None:
-        await self._repository.delete(novel_id)
+    async def delete(
+        self, novel_id: int, author_id: int | None = None
+    ) -> bool:
+        return await self._repository.delete(novel_id, author_id)
 
     async def update_plot_design(self, novel_id: int, plot_design: dict) -> None:
         """Сохраняет снапшот design-doc новеллы (dict для JSONB-колонки)."""

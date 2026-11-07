@@ -26,5 +26,8 @@ class NovelGenerateRequestedSchema(BaseModel):
     job_id: int = Field(..., description="ID задачи")
     prompt: str = Field(..., min_length=1)
     universe_id: int | None = None
+    # id автора из my_choice_api; None — сообщение старого формата/системная
+    # генерация, новелла сохранится с NULL (колонка nullable как защита).
+    author_id: int | None = None
     mode: NovelMode = NovelMode.LINEAR
     prompt_variant: PromptVariant = PromptVariant.DEFAULT

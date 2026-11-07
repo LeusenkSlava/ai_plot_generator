@@ -242,6 +242,7 @@ class NovelRepository:
             description=novel.description,
             tone=novel.tone,
             universe_id=novel.universe_id,
+            author_id=novel.author_id,
             mode=novel.mode,
             prompt_variant=novel.prompt_variant,
             plot_design=novel.plot_design,
@@ -250,33 +251,61 @@ class NovelRepository:
         await self._session.flush()
         return self._to_domain(db_novel)
 
-    async def get_by_id(self, novel_id: int) -> Novel | None:
-        result = await self._session.execute(
-            select(NovelModel).where(NovelModel.id == novel_id)
-        )
+    async def get_by_id(
+        self, novel_id: int, author_id: int | None = None
+    ) -> Novel | None:
+        """Новелла по id. ``author_id`` сужает выборку до библиотеки автора.
+
+        Чужая новелла неотличима от несуществующей (``None`` → 404 у роутера),
+        чтобы не раскрывать сам факт её существования.
+        """
+        statement = select(NovelModel).where(NovelModel.id == novel_id)
+        if author_id is not None:
+            statement = statement.where(NovelModel.author_id == author_id)
+        result = await self._session.execute(statement)
         db_novel = result.scalar_one_or_none()
         return self._to_domain(db_novel) if db_novel else None
 
-    async def list_all(self, limit: int, offset: int) -> list[Novel]:
+    async def list_all(
+        self, limit: int, offset: int, author_id: int | None = None
+    ) -> list[Novel]:
+        statement = select(NovelModel)
+        if author_id is not None:
+            statement = statement.where(NovelModel.author_id == author_id)
         result = await self._session.execute(
-            select(NovelModel)
-            .order_by(NovelModel.created_at.desc(), NovelModel.id.desc())
+            statement.order_by(
+                NovelModel.created_at.desc(), NovelModel.id.desc()
+            )
             .limit(limit)
             .offset(offset)
         )
         return [self._to_domain(n) for n in result.scalars().all()]
 
-    async def count(self) -> int:
-        result = await self._session.execute(
-            select(func.count()).select_from(NovelModel)
-        )
+    async def count(self, author_id: int | None = None) -> int:
+        statement = select(func.count()).select_from(NovelModel)
+        if author_id is not None:
+            statement = statement.where(NovelModel.author_id == author_id)
+        result = await self._session.execute(statement)
         return result.scalar_one()
 
-    async def delete(self, novel_id: int) -> None:
-        """Удаляет новеллу; всё дерево потомков каскадно убирает СУБД (ON DELETE CASCADE)."""
-        db_novel = await self._session.get(NovelModel, novel_id)
-        if db_novel:
-            await self._session.delete(db_novel)
+    async def delete(
+        self, novel_id: int, author_id: int | None = None
+    ) -> bool:
+        """Удаляет новеллу; всё дерево потомков каскадно убирает СУБД.
+
+        Возвращает ``False``, если новеллы нет или она принадлежит другому
+        автору — роутер отдаёт на это 404.
+        """
+        statement = select(NovelModel).where(NovelModel.id == novel_id)
+        if author_id is not None:
+            statement = statement.where(NovelModel.author_id == author_id)
+        db_novel = (
+            await self._session.execute(statement)
+        ).scalar_one_or_none()
+        if db_novel is None:
+            return False
+        await self._session.delete(db_novel)
+        return True
 
     async def update_plot_design(self, novel_id: int, plot_design: dict) -> None:
         """Сохраняет снапшот design-doc новеллы (колонка JSONB)."""
@@ -294,6 +323,7 @@ class NovelRepository:
             description=db_novel.description,
             tone=db_novel.tone,
             universe_id=db_novel.universe_id,
+            author_id=db_novel.author_id,
             mode=db_novel.mode,
             prompt_variant=PromptVariant(db_novel.prompt_variant),
             plot_design=db_novel.plot_design,

@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import Depends
+from fastapi import Depends, Header, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.novels.services.crud import (
@@ -27,6 +27,20 @@ from src.outbound.database.repositories.novel_repository import (
     RoadmapRepository,
     SceneRepository,
 )
+
+
+def get_author_id(
+    x_user_id: Annotated[int | None, Header(alias="X-User-Id")] = None,
+) -> int:
+    """Автор запроса — id учётки ``my_choice_api`` из заголовка ``X-User-Id``.
+
+    JWT проверяет шлюз: сюда доходят только доверенные запросы. Отсутствие
+    заголовка — ошибка конфигурации шлюза, поэтому отказываем (fail closed), а
+    не отдаём общую библиотеку всем подряд.
+    """
+    if x_user_id is None or x_user_id < 1:
+        raise HTTPException(status_code=401, detail="UNAUTHORIZED")
+    return x_user_id
 
 
 def get_novel_repository(

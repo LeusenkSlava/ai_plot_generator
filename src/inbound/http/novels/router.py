@@ -12,6 +12,7 @@ from src.core.novels.services.crud import NovelService
 from src.core.novels.services.playback import NovelPlaybackService
 from src.inbound.http.novels.dependencies import (
     build_choose_option_use_case,
+    get_author_id,
     get_novel_playback_service,
     get_novel_service,
 )
@@ -34,8 +35,9 @@ router = APIRouter(prefix="/novels", tags=["novels"])
 async def get_novel(
     novel_id: int,
     service: Annotated[NovelService, Depends(get_novel_service)],
+    author_id: Annotated[int, Depends(get_author_id)],
 ):
-    novel = await service.get(novel_id)
+    novel = await service.get(novel_id, author_id)
     if novel is None:
         raise HTTPException(status_code=404, detail="Novel not found")
     return novel
@@ -49,6 +51,7 @@ async def get_novel(
 async def start_novel(
     novel_id: int,
     service: Annotated[NovelPlaybackService, Depends(get_novel_playback_service)],
+    author_id: Annotated[int, Depends(get_author_id)],
     offset: int | None = None,
 ):
     """offset — id последней показанной реплики; без него новелла начинается с начала.
@@ -62,7 +65,7 @@ async def start_novel(
     - finished — новелла пройдена до конца.
     """
     try:
-        result = await service.next(novel_id, offset)
+        result = await service.next(novel_id, offset, author_id)
     except NovelNotFoundError:
         raise HTTPException(status_code=404, detail="Novel not found")
     except DialogueLineNotFoundError:
@@ -84,6 +87,7 @@ async def start_novel(
 async def choose_option(
     novel_id: int,
     body: Annotated[ChooseRequest, Body(...)],
+    author_id: Annotated[int, Depends(get_author_id)],
 ):
     """Фиксирует выбор игрока на развилке.
 
@@ -99,6 +103,7 @@ async def choose_option(
                 body.roadmap_choice_id,
                 body.dialogue_line_id,
                 step=session.begin,
+                author_id=author_id,
             )
         except NovelNotFoundError:
             raise HTTPException(status_code=404, detail="Novel not found")
@@ -110,10 +115,13 @@ async def choose_option(
 @router.get("/", response_model=NovelListResponse)
 async def list_novels(
     service: Annotated[NovelService, Depends(get_novel_service)],
+    author_id: Annotated[int, Depends(get_author_id)],
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0)] = 0,
 ):
-    novels, total = await service.list(limit=limit, offset=offset)
+    novels, total = await service.list(
+        limit=limit, offset=offset, author_id=author_id
+    )
     return {"items": novels, "total": total, "limit": limit, "offset": offset}
 
 
@@ -121,5 +129,7 @@ async def list_novels(
 async def delete_novel(
     novel_id: int,
     service: Annotated[NovelService, Depends(get_novel_service)],
+    author_id: Annotated[int, Depends(get_author_id)],
 ):
-    await service.delete(novel_id)
+    if not await service.delete(novel_id, author_id):
+        raise HTTPException(status_code=404, detail="Novel not found")

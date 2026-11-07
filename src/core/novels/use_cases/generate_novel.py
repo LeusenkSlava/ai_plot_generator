@@ -49,6 +49,7 @@ class GenerateNovelUseCase:
         universe_id: int | None,
         mode: NovelMode = NovelMode.LINEAR,
         prompt_variant: str = DEFAULT_PROMPT_VARIANT,
+        author_id: int | None = None,
         *,
         step: TransactionFactory,
     ) -> GenerationJob:
@@ -74,6 +75,7 @@ class GenerateNovelUseCase:
                     universe_id,
                     mode,
                     prompt_variant=prompt_variant,
+                    author_id=author_id,
                     step=step,
                 )
             except NovelGenerationFailedError as e:
