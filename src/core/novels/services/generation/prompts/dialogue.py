@@ -18,7 +18,7 @@ from src.core.novels.services.generation.prompts.catalog import render_messages
 from src.core.novels.services.generation.prompts.context import render_place_time
 from src.core.novels.services.generation.prompts.text import RUSSIAN_OUTPUT_NOTE
 
-PREVIOUS_LINE_MAX_CHARS = 300
+PREVIOUS_LINE_MAX_CHARS = 600
 
 OUTFIT_POLICY = (
     "An outfit is chosen for the scene, not fixed for the whole novel. Within one scene a "
@@ -111,27 +111,44 @@ class DialoguePromptBuilder:
                     "DialoguePromptBuilder: scene_assets is required when assets are present"
                 )
             assets_block = (
-                "\nFor the visual of each line, pick assets ONLY from the catalog, "
-                "specifying slugs and tags exactly as in the catalog, and add these fields to the line object:\n"
-                "- background_base_tag - ONE location tag from the location list that fits the scene's place "
-                "(usually one for the whole scene; change it only if the action moves to another place);\n"
-                "- background_modifier_tags - a list of 0 or more modifier tags from the modifier list "
-                "(time of day, inside/outside, light, people) matching the scene's time and setting;\n"
+                "\nFor the visual, pick assets ONLY from the catalog, specifying slugs "
+                "and tags exactly as in the catalog:\n"
+                "- background_modifier_tags - a single top-level field: a list of 0 or more "
+                "modifier tags from the modifier list (inside/outside, light, people, "
+                "bedroom, party...) that describe the scene's OPENING setting, applied "
+                "from the first line until the first background change. Do not put a "
+                "location or a time of day here: the opening location is the scene's "
+                "place, and the time of day is fixed for the whole scene and added "
+                "automatically (do not change it via background_changes either).\n"
+                "- background_changes - an optional top-level field: a list of 0 to 3 "
+                "background changes, each { at_line: integer, location_slug: string|null, "
+                "background_modifier_tags: [string] }. at_line is the 1-based position in "
+                "the dialogue_lines array of the FIRST line that happens in the new "
+                "setting; the new background applies from that line until the next change. "
+                "location_slug is the base location for the new setting, picked ONLY from "
+                "the locations list in the catalog; set it to null (or omit it) to stay in "
+                "the current place and change only the modifiers. The time of day never "
+                "changes within a scene, so do not put a time-of-day tag here either. Use "
+                "a change ONLY when the action genuinely moves to a different setting "
+                "(inside the bus → outside at the gates; a bunkroom → a porch → the forest "
+                "edge), and ALWAYS show that move in a narration line at or right before "
+                "at_line so the reader is grounded. Do not change the background for mood, "
+                "camera, or a minor gesture.\n"
+                "For each line, add these fields to the line object:\n"
                 "- outfit_tag - ONE outfit style tag from the speaker's outfits;\n"
-                "- emotion_base_tag - ONE main emotion tag from the base emotions of the chosen outfit, "
-                "matching the text of the line;\n"
+                "- emotion_base_tag - ONE main emotion tag from the base emotions of the "
+                "chosen outfit, matching the text of the line;\n"
                 "- emotion_modifier_tags - a list of 0 or more emotion modifier tags "
                 "from the modifiers of the chosen outfit.\n"
                 "Pick the outfit first, then choose the emotions ONLY from the emotions "
                 "listed under that chosen outfit.\n"
                 "For the protagonist's lines (no sprite), set null for outfit_tag and "
-                "emotion_base_tag and an empty list [] for emotion_modifier_tags; "
-                "specify the background (background_base_tag and background_modifier_tags) as for other lines.\n"
-                'For narration lines (kind="narration"), there is no sprite, outfit, or emotion: '
-                "set null for outfit_tag and emotion_base_tag and an empty list [] for "
-                "emotion_modifier_tags; specify only the background "
-                "(background_base_tag and background_modifier_tags) as for other lines.\n"
-                "If there is no suitable asset, set null; for emotion_modifier_tags set an empty list [].\n"
+                "emotion_base_tag and an empty list [] for emotion_modifier_tags.\n"
+                'For narration lines (kind="narration"), there is no sprite, outfit, or '
+                "emotion: set null for outfit_tag and emotion_base_tag and an empty list [] "
+                "for emotion_modifier_tags.\n"
+                "If there is no suitable asset, set null; for emotion_modifier_tags set an "
+                "empty list [].\n"
             ) + OUTFIT_POLICY
             asset_catalog = "\n\nAsset catalog:\n" + self._scene_assets.assets_catalog(
                 ctx.all_characters, ctx.assets
@@ -161,10 +178,12 @@ class DialoguePromptBuilder:
         if ctx.previous_lines:
             names = {character.id: character.name for character in ctx.all_characters}
             recap = "\n".join(
-                self.render_previous_line(line, names) for line in ctx.previous_lines
+                self.render_previous_line(line, names, with_location=True)
+                for line in ctx.previous_lines
             )
             previous_lines_block = (
-                "\n\nLast lines of the previous scene (continue the story, do not repeat them):\n"
+                "\n\nLast lines of the previous scene (each line is prefixed with "
+                "[location] where it happens; continue the story, do not repeat them):\n"
                 f"{recap}"
             )
 
@@ -220,14 +239,20 @@ class DialoguePromptBuilder:
         line: DialogueLine,
         names: dict[int | None, str],
         narration_label: str = "[narration]",
+        with_location: bool = False,
     ) -> str:
         """Одна прошлая реплика для блока «последние реплики».
 
         ``narration_label`` — ``[narration]`` в диалоге, ``[описание]`` в изложении.
+        ``with_location=True`` добавляет префикс ``[location]`` с тегом локации,
+        где происходит реплика (нужен диалогу, чтобы не путать места между сценами).
         """
         text = _short(line.text, PREVIOUS_LINE_MAX_CHARS)
+        location = f"[{line.location_slug}] " if (
+            with_location and line.location_slug
+        ) else ""
         if line.kind is LineKind.NARRATION:
-            return f"{narration_label} {text}"
+            return f"{location}{narration_label} {text}"
         name = names.get(line.character_id, "?")
         thought = " (thoughts)" if line.kind is LineKind.THOUGHT else ""
-        return f"{name}{thought}: {text}"
+        return f"{location}{name}{thought}: {text}"

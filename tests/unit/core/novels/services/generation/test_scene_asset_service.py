@@ -1,12 +1,16 @@
 """Юнит-тесты SceneAssetService: резолв ассетов сцены через Codex."""
 
-from src.core.codex.models import TagKind, VisualMatch
+import logging
+
+from src.core.codex.models import BackgroundTags, Tag, TagKind, TagType, VisualMatch
 from src.core.novels.services.generation.assets import (
+    BackgroundChange,
+    BackgroundSegment,
     LineAssets,
     SceneAssets,
     SceneAssetService,
 )
-from tests.factories import background_domain, novel_character_domain
+from tests.factories import background_domain, novel_character_domain, scene_domain
 from tests.fakes.outbound.codex.client import FakeCodexService
 from tests.unit.outbound.codex.factories import (
     outfit_emotion_domain,
@@ -112,6 +116,238 @@ def _catalog_sections(catalog: str) -> dict[str, str]:
         elif current is not None:
             sections[current].append(line)
     return {tag: "\n".join(lines) for tag, lines in sections.items()}
+
+
+def test_anchor_background_tags_uses_scene_location_and_forced_time():
+    """База = локация сцены; время суток принудительно из сцены, а не из LLM."""
+    scene = scene_domain(location_slug="beach", time_of_day="night")
+    assets = SceneAssets(
+        background_tags=BackgroundTags(
+            base=[Tag(id=1, type=TagType.LOCATION, slug="beach", name="Пляж")],
+            modifiers=[
+                Tag(id=2, type=TagType.TIME_OF_DAY, slug="day", name="День"),
+                Tag(id=3, type=TagType.TIME_OF_DAY, slug="night", name="Ночь"),
+                Tag(id=4, type=TagType.LOCATION, slug="with_people", name="С людьми"),
+            ],
+        )
+    )
+
+    tags = SceneAssetService.anchor_background_tags(
+        scene, ["day", "with_people"], assets
+    )
+
+    assert tags == ["beach", "with_people", "night"]
+
+
+def test_anchor_background_tags_none_without_location():
+    """Без локации сцены якорь фона не строится (обратная совместимость)."""
+    scene = scene_domain(location_slug=None)
+    assets = SceneAssets(
+        background_tags=BackgroundTags(
+            base=[Tag(id=1, type=TagType.LOCATION, slug="beach", name="Пляж")],
+            modifiers=[],
+        )
+    )
+
+    assert SceneAssetService.anchor_background_tags(scene, [], assets) is None
+
+
+def test_background_tags_warns_when_model_supplies_time_of_day(caplog):
+    """Попытка модели задать время суток логируется, а не теряется молча."""
+    scene = scene_domain(location_slug="beach", time_of_day="night")
+    assets = SceneAssets(
+        background_tags=BackgroundTags(
+            base=[Tag(id=1, type=TagType.LOCATION, slug="beach", name="Пляж")],
+            modifiers=[
+                Tag(id=2, type=TagType.TIME_OF_DAY, slug="day", name="День"),
+                Tag(id=3, type=TagType.TIME_OF_DAY, slug="night", name="Ночь"),
+            ],
+        )
+    )
+
+    with caplog.at_level(
+        logging.WARNING,
+        logger="src.core.novels.services.generation.assets",
+    ):
+        tags = SceneAssetService.anchor_background_tags(scene, ["day"], assets)
+
+    assert tags == ["beach", "night"]
+    assert "overridden by scene.time_of_day" in caplog.text
+    assert "['day']" in caplog.text
+
+
+def _segment_assets() -> SceneAssets:
+    return SceneAssets(
+        background_tags=BackgroundTags(
+            base=[
+                Tag(id=1, type=TagType.LOCATION, slug="beach", name="Пляж"),
+                Tag(id=6, type=TagType.LOCATION, slug="gate", name="Ворота"),
+            ],
+            modifiers=[
+                Tag(id=2, type=TagType.TIME_OF_DAY, slug="day", name="День"),
+                Tag(id=3, type=TagType.TIME_OF_DAY, slug="night", name="Ночь"),
+                Tag(id=4, type=TagType.LOCATION, slug="inside", name="Внутри"),
+                Tag(id=5, type=TagType.LOCATION, slug="outside", name="Снаружи"),
+            ],
+        )
+    )
+
+
+def test_anchor_background_tags_per_line_applies_changes_at_line():
+    """Смена фона действует с указанной реплики; время суток принудительно из сцены."""
+    scene = scene_domain(location_slug="beach", time_of_day="night")
+
+    segments = SceneAssetService.anchor_background_tags_per_line(
+        scene, ["inside"], [BackgroundChange(3, None, ["outside"])], 5, _segment_assets()
+    )
+
+    assert [s.tags for s in segments] == [
+        ["beach", "inside", "night"],
+        ["beach", "inside", "night"],
+        ["beach", "outside", "night"],
+        ["beach", "outside", "night"],
+        ["beach", "outside", "night"],
+    ]
+    assert [s.location_slug for s in segments] == ["beach"] * 5
+
+
+def test_anchor_background_tags_per_line_changes_location():
+    """Смена может явно поменять базовую локацию сегмента."""
+    scene = scene_domain(location_slug="beach", time_of_day="night")
+
+    segments = SceneAssetService.anchor_background_tags_per_line(
+        scene, ["inside"], [BackgroundChange(3, "gate", ["outside"])], 4, _segment_assets()
+    )
+
+    assert [s.tags for s in segments] == [
+        ["beach", "inside", "night"],
+        ["beach", "inside", "night"],
+        ["gate", "outside", "night"],
+        ["gate", "outside", "night"],
+    ]
+    assert [s.location_slug for s in segments] == ["beach", "beach", "gate", "gate"]
+
+
+def test_anchor_background_tags_per_line_ignores_unknown_location():
+    """Неизвестная локация смены игнорируется — остаётся текущая база."""
+    scene = scene_domain(location_slug="beach", time_of_day="night")
+
+    segments = SceneAssetService.anchor_background_tags_per_line(
+        scene, [], [BackgroundChange(2, "forest", [])], 3, _segment_assets()
+    )
+
+    assert [s.tags for s in segments] == [
+        ["beach", "night"],
+        ["beach", "night"],
+        ["beach", "night"],
+    ]
+
+
+def test_anchor_background_tags_per_line_none_without_anchor():
+    """Без вселенной/локации все реплики получают tags=None (фон не резолвится)."""
+    scene = scene_domain(location_slug=None)
+
+    segments = SceneAssetService.anchor_background_tags_per_line(
+        scene, [], [], 3, _segment_assets()
+    )
+
+    assert segments == [BackgroundSegment(None, None)] * 3
+
+
+def test_normalize_background_changes_filters_invalid():
+    """Невалидные/дублирующиеся смены отбрасываются, результат отсортирован."""
+    raw = [
+        {"at_line": 3, "location_slug": "gate", "background_modifier_tags": ["outside"]},
+        {"at_line": 1, "background_modifier_tags": ["inside"]},
+        {"at_line": 99, "background_modifier_tags": ["x"]},  # вне диапазона
+        {"at_line": 3, "background_modifier_tags": ["y"]},  # дубль at_line
+        {"at_line": 4, "background_modifier_tags": []},  # без локации и модификаторов
+        {"at_line": "5", "background_modifier_tags": ["z"]},  # строковый индекс
+        {"at_line": 6, "background_modifier_tags": "bad"},  # не-список
+        "not-a-dict",
+    ]
+
+    changes = SceneAssetService.normalize_background_changes(raw, 5)
+
+    assert changes == [
+        BackgroundChange(1, None, ["inside"]),
+        BackgroundChange(3, "gate", ["outside"]),
+        BackgroundChange(5, None, ["z"]),
+    ]
+
+
+async def test_match_assets_reuses_scene_background_for_all_lines():
+    """Одинаковый набор тегов резолвится один раз и раздаётся всем репликам."""
+    codex = FakeCodexService()
+    codex.add_backgrounds(
+        1,
+        [
+            background_domain(
+                id=1,
+                universe_id=1,
+                slug="forest",
+                description="Лес",
+                asset_key="bg/forest.png",
+                sound_asset_key="sounds/forest.ogg",
+            )
+        ],
+    )
+
+    service = SceneAssetService(codex)
+    character = novel_character_domain(
+        id=1, novel_id=1, name="Алиса", role="Ведьма", is_protagonist=True,
+    )
+    prepared = [(character, {}, LineAssets()), (character, {}, LineAssets())]
+
+    resolved = await service.match_assets(
+        prepared, SceneAssets(), universe_id=1,
+        line_background_tags=[["forest"], ["forest"]],
+    )
+
+    assert [r.background_asset_key for r in resolved] == ["bg/forest.png", "bg/forest.png"]
+    bg_calls = [c for c in codex.calls if c[0] == "match_background"]
+    assert len(bg_calls) == 1
+
+
+async def test_match_assets_resolves_distinct_backgrounds_per_segment():
+    """Разные наборы тегов дают разные фоны; одинаковые — резолвятся один раз."""
+    codex = FakeCodexService()
+    codex.add_backgrounds(
+        1,
+        [
+            background_domain(
+                id=1, universe_id=1, slug="forest", description="Лес",
+                asset_key="bg/forest.png",
+            ),
+            background_domain(
+                id=2, universe_id=1, slug="beach", description="Пляж",
+                asset_key="bg/beach.png",
+            ),
+        ],
+    )
+
+    service = SceneAssetService(codex)
+    character = novel_character_domain(
+        id=1, novel_id=1, name="Алиса", role="Ведьма", is_protagonist=True,
+    )
+    prepared = [
+        (character, {}, LineAssets()),
+        (character, {}, LineAssets()),
+        (character, {}, LineAssets()),
+    ]
+
+    resolved = await service.match_assets(
+        prepared, SceneAssets(), universe_id=1,
+        line_background_tags=[["forest"], ["beach"], ["beach"]],
+    )
+
+    assert [r.background_asset_key for r in resolved] == [
+        "bg/forest.png",
+        "bg/beach.png",
+        "bg/beach.png",
+    ]
+    bg_calls = [c for c in codex.calls if c[0] == "match_background"]
+    assert len(bg_calls) == 2
 
 
 def test_catalog_renders_each_outfit_tag_once():

@@ -197,6 +197,7 @@ class DialogueLineModel(BaseModel):
     background_asset_key: Mapped[str | None] = mapped_column(String, nullable=True)
     sound_asset_key: Mapped[str | None] = mapped_column(String, nullable=True)
     sprite_asset_key: Mapped[str | None] = mapped_column(String, nullable=True)
+    location_slug: Mapped[str | None] = mapped_column(String, nullable=True)
     outfit_tag: Mapped[str | None] = mapped_column(String, nullable=True)
     outfit_asset_key: Mapped[str | None] = mapped_column(String, nullable=True)
     emotion_asset_key: Mapped[str | None] = mapped_column(String, nullable=True)

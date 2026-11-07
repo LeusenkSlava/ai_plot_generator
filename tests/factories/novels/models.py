@@ -174,6 +174,7 @@ def dialogue_line_domain(
     background_asset_key: str | None = None,
     sound_asset_key: str | None = None,
     sprite_asset_key: str | None = None,
+    location_slug: str | None = None,
     outfit_tag: str | None = None,
     outfit_asset_key: str | None = None,
     emotion_asset_key: str | None = None,
@@ -192,6 +193,7 @@ def dialogue_line_domain(
         background_asset_key=background_asset_key,
         sound_asset_key=sound_asset_key,
         sprite_asset_key=sprite_asset_key,
+        location_slug=location_slug,
         outfit_tag=outfit_tag,
         outfit_asset_key=outfit_asset_key,
         emotion_asset_key=emotion_asset_key,
@@ -205,11 +207,19 @@ def dialogue_line_payload(
     **asset_fields,
 ) -> dict:
     """Одна реплика в ответе LLM. asset_fields — необязательные
-    background_base_tag/background_modifier_tags/outfit_tag/
-    emotion_base_tag/emotion_modifier_tags."""
+    outfit_tag/emotion_base_tag/emotion_modifier_tags/kind."""
     return {"character_name": character_name, "text": text, **asset_fields}
 
 
-def valid_dialogue_llm_payload(*lines: dict) -> dict:
-    """Валидный ответ LLM генератора диалога: список реплик."""
-    return {"dialogue_lines": list(lines)}
+def valid_dialogue_llm_payload(
+    *lines: dict,
+    background_modifier_tags: list[str] | None = None,
+    background_changes: list[dict] | None = None,
+) -> dict:
+    """Валидный ответ LLM генератора диалога: реплики + теги фона сцены (опц.)."""
+    payload = {"dialogue_lines": list(lines)}
+    if background_modifier_tags is not None:
+        payload["background_modifier_tags"] = background_modifier_tags
+    if background_changes is not None:
+        payload["background_changes"] = background_changes
+    return payload

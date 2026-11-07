@@ -172,7 +172,8 @@ class DialogueGenerator(BaseGenerator):
                 f"ретраев: {last_reason or 'неизвестная ошибка'}"
             )
 
-        # Фаза 1: запросы на подбор фона/спрайта/одежды/эмоции по тегам от LLM
+        # Фаза 1: запросы на подбор спрайта/одежды/эмоции по тегам от LLM.
+        # Фон в реплику не входит: он резолвится один раз на всю сцену.
         prepared: list[tuple[Character | None, dict, LineAssets]] = []
         for item in lines_data:
             # После repair_lines каждый ``kind`` уже каноничен (иначе repair
@@ -196,9 +197,24 @@ class DialogueGenerator(BaseGenerator):
                 )
             )
 
-        # Фаза 2: подбираем фон/эмоцию/спрайт/одежду через Codex (параллельно)
+        # Фаза 2: фон — по сегментам сцены (открывающий + background_changes);
+        # спрайт/эмоция/одежда — через Codex (параллельно).
+        raw_background_tags = data.get("background_modifier_tags")
+        background_modifier_tags = (
+            raw_background_tags if isinstance(raw_background_tags, list) else []
+        )
+        background_changes = self._scene_assets.normalize_background_changes(
+            data.get("background_changes"), len(lines_data)
+        )
+        segments = self._scene_assets.anchor_background_tags_per_line(
+            scene, background_modifier_tags, background_changes, len(lines_data), assets
+        )
+        line_background_tags = [segment.tags for segment in segments]
         resolved = await self._scene_assets.match_assets(
-            prepared, assets, novel.universe_id if novel else None
+            prepared,
+            assets,
+            novel.universe_id if novel else None,
+            line_background_tags=line_background_tags,
         )
 
         # Фаза 2.5: если наряд резолвился, а эмоция нет (LLM выдумал emotion-тег),
@@ -234,6 +250,7 @@ class DialogueGenerator(BaseGenerator):
                     background_asset_key=assets_picked.background_asset_key,
                     sound_asset_key=assets_picked.sound_asset_key,
                     sprite_asset_key=assets_picked.sprite_asset_key,
+                    location_slug=segments[index].location_slug,
                     outfit_tag=assets_picked.outfit_tag,
                     outfit_asset_key=assets_picked.outfit_asset_key,
                     emotion_asset_key=assets_picked.emotion_asset_key,

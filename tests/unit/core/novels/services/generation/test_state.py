@@ -475,13 +475,13 @@ class TestNovelState:
         assert state.last_story_context_before(2) == "прошлое"
         assert state.last_story_context_before(1) is None
 
-    def test_previous_dialogue_lines_limited_to_four(self):
-        lines = [dialogue_line_domain(id=i, order=i) for i in range(1, 7)]
+    def test_previous_dialogue_lines_limited_to_limit(self):
+        lines = [dialogue_line_domain(id=i, order=i) for i in range(1, 20)]
 
         state = NovelState([], [], lines, [], [])
 
         assert len(state.previous_dialogue_lines) == PREVIOUS_LINES_LIMIT
-        assert [l.order for l in state.previous_dialogue_lines] == [3, 4, 5, 6]
+        assert [l.order for l in state.previous_dialogue_lines] == [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
 
     def test_previous_dialogue_lines_keeps_input_order(self):
         """previous_dialogue_lines не сортирует — просто берёт хвост списка."""

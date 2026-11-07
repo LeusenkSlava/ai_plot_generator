@@ -16,10 +16,11 @@ from src.core.codex.models import (
     OutfitEmotion,
     OutfitWithEmotions,
     TagKind,
+    TagType,
 )
 from src.core.codex.services import CodexService
 from src.core.novels.exceptions import GenerationError
-from src.core.novels.models import Character
+from src.core.novels.models import Character, Scene
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,20 @@ def _split_emotions(
         else:
             base.append(emotion)
     return base, modifiers
+
+
+def _clean_tags(value: object) -> list[str]:
+    """Нормализует список slug-тегов: только строки, без пустых, без повторов.
+
+    Порядок сохраняется; не-список и не-строковые элементы отбрасываются.
+    """
+    if not isinstance(value, list):
+        return []
+    tags: list[str] = []
+    for tag in value:
+        if isinstance(tag, str) and tag.strip() and tag.strip() not in tags:
+            tags.append(tag.strip())
+    return tags
 
 
 @dataclass
@@ -80,6 +95,27 @@ class ResolvedAssets:
     emotion_asset_key: str | None = None
 
 
+@dataclass(frozen=True)
+class BackgroundChange:
+    """Смена фона внутри сцены: с какой реплики и на какой фон.
+
+    ``location_slug`` — базовая локация нового сегмента (``None`` — сохранить
+    текущую). ``modifiers`` — модификаторы нового сегмента.
+    """
+
+    at_line: int
+    location_slug: str | None
+    modifiers: list[str]
+
+
+@dataclass(frozen=True)
+class BackgroundSegment:
+    """Фон одного сегмента сцены: базовая локация + полный набор тегов."""
+
+    location_slug: str | None
+    tags: list[str] | None
+
+
 class SceneAssetService:
     """Загрузка и подбор визуальных ассетов сцены через Codex."""
 
@@ -111,19 +147,14 @@ class SceneAssetService:
     def prepare_line(
         item: dict, character: Character | None, assets: SceneAssets
     ) -> LineAssets:
-        """Переводит выбранные LLM теги в запросы подбора ассетов Codex.
+        """Переводит выбранные LLM теги наряда/эмоции в запросы подбора ассетов.
 
-        ``character is None`` — narration-ремарка: у неё нет спрайта/наряда/эмоции,
-        задаётся только фон.
+        ``character is None`` — narration-ремарка: у неё нет спрайта/наряда/эмоции.
+        Фон сюда не входит: он резолвится по сегментам сцены (см. ``match_assets``).
         """
         line = LineAssets()
         if not assets:
             return line
-
-        base_tag = item.get("background_base_tag")
-        if base_tag:
-            modifier_tags = item.get("background_modifier_tags") or []
-            line.background_tags = [base_tag, *modifier_tags]
 
         if character is None or character.is_protagonist:
             # Narration / протагонист на экране не показывается: наряд/эмоция не нужны.
@@ -178,21 +209,221 @@ class SceneAssetService:
             return visual.emotion_asset_key
         return None
 
+    @staticmethod
+    def _background_tags(
+        scene: Scene, base: str, modifiers: list[str], assets: SceneAssets
+    ) -> list[str] | None:
+        """Собирает ``[base, *modifiers]`` с принудительным временем суток из сцены.
+
+        Возвращает ``None``, когда подбирать фон не из чего (нет вселенной или нет
+        базовой локации).
+        """
+        if not assets or not assets.background_tags:
+            return None
+        normalized_base = (base or "").strip() or None
+        if not normalized_base:
+            return None
+
+        cleaned = _clean_tags(modifiers)
+        if scene.time_of_day:
+            time_slugs = {
+                t.slug
+                for t in assets.background_tags.modifiers
+                if t.type is TagType.TIME_OF_DAY
+            }
+            overridden = [m for m in cleaned if m in time_slugs]
+            if overridden:
+                logger.warning(
+                    "SceneAssetService: model-supplied time-of-day tags %s are "
+                    "overridden by scene.time_of_day=%r",
+                    overridden,
+                    scene.time_of_day,
+                )
+            cleaned = [m for m in cleaned if m not in time_slugs]
+            if scene.time_of_day not in cleaned:
+                cleaned.append(scene.time_of_day)
+
+        return [normalized_base, *cleaned]
+
+    @staticmethod
+    def anchor_background_tags(
+        scene: Scene, background_modifier_tags: list[str], assets: SceneAssets
+    ) -> list[str] | None:
+        """Собирает один набор тегов фона на всю сцену: база + модификаторы.
+
+        База — ``scene.location_slug`` (задаётся шагом роадмапа и сверяется
+        валидатором сцены). Модификаторы — однократный выбор LLM
+        (``background_modifier_tags``) с принудительной заменой времени суток на
+        ``scene.time_of_day``. Возвращает ``None``, когда подбирать фон не из чего
+        (нет вселенной или нет локации).
+        """
+        return SceneAssetService._background_tags(
+            scene, scene.location_slug or "", background_modifier_tags, assets
+        )
+
+    @staticmethod
+    def normalize_background_changes(
+        raw: object, line_count: int
+    ) -> list[BackgroundChange]:
+        """Нормализует сырые ``background_changes`` в отсортированный список ``BackgroundChange``.
+
+        Оставляет только валидные смены: ``at_line`` — целое в ``[1, line_count]``
+        без повторов; ``location_slug`` — строка или ``None``; ``background_modifier_tags``
+        — список тегов (может быть пустым, если задан ``location_slug``). Результат
+        отсортирован по ``at_line``; невалидные записи отбрасываются.
+        """
+        if not isinstance(raw, list) or line_count <= 0:
+            return []
+        changes: list[BackgroundChange] = []
+        seen: set[int] = set()
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            raw_line = item.get("at_line")
+            if not isinstance(raw_line, (int, str)):
+                continue
+            try:
+                at_line = int(raw_line)
+            except (TypeError, ValueError):
+                continue
+            modifiers = _clean_tags(item.get("background_modifier_tags"))
+            location = item.get("location_slug")
+            location_slug = (
+                location.strip()
+                if isinstance(location, str) and location.strip()
+                else None
+            )
+            if not (1 <= at_line <= line_count) or at_line in seen:
+                continue
+            # Пустая смена (ни модификаторов, ни локации) не меняет фон — пропускаем.
+            if not modifiers and location_slug is None:
+                continue
+            seen.add(at_line)
+            changes.append(BackgroundChange(at_line, location_slug, modifiers))
+        changes.sort(key=lambda change: change.at_line)
+        return changes
+
+    @staticmethod
+    def anchor_background_tags_per_line(
+        scene: Scene,
+        opening_modifiers: list[str],
+        changes: list[BackgroundChange],
+        line_count: int,
+        assets: SceneAssets,
+    ) -> list[BackgroundSegment]:
+        """Фон каждого сегмента сцены: открывающая локация + смены по репликам.
+
+        ``changes`` — уже нормализованный отсортированный список ``BackgroundChange``,
+        где ``at_line`` — 1-базовый индекс первой реплики нового места. Смена может
+        нести ``location_slug`` (новую базовую локацию из каталога; неизвестная
+        локация игнорируется — остаётся текущая) и/или новые модификаторы. Возвращает
+        список длиной ``line_count``; ``tags=None`` на позиции означает «фон для этой
+        реплики не резолвится» (нет вселенной/локации — якоря нет вовсе).
+        """
+        if line_count <= 0:
+            return []
+        opening_base = scene.location_slug
+        opening_tags = SceneAssetService._background_tags(
+            scene, opening_base or "", opening_modifiers, assets
+        )
+        if opening_tags is None:
+            return [BackgroundSegment(opening_base, None)] * line_count
+
+        valid_bases = {
+            tag.slug for tag in (assets.background_tags.base or [])
+        } if assets.background_tags else set()
+
+        per_line: list[BackgroundSegment] = []
+        change_index = 0
+        current_base = opening_base
+        current_tags = opening_tags
+        for line_index in range(1, line_count + 1):
+            while change_index < len(changes) and changes[change_index].at_line <= line_index:
+                change = changes[change_index]
+                next_base = change.location_slug or current_base
+                if next_base != current_base and next_base not in valid_bases:
+                    logger.warning(
+                        "SceneAssetService: unknown background location %r in "
+                        "background_changes; keeping %r",
+                        next_base,
+                        current_base,
+                    )
+                    next_base = current_base
+                current_base = next_base
+                tags = SceneAssetService._background_tags(
+                    scene, current_base or "", change.modifiers, assets
+                )
+                # Якорь уже проверен выше: база и ассеты есть — None невозможен.
+                assert tags is not None
+                current_tags = tags
+                change_index += 1
+            per_line.append(BackgroundSegment(current_base, list(current_tags)))
+        return per_line
+
+    async def match_scene_background(
+        self, universe_id: int | None, tags: list[str] | None
+    ) -> ResolvedAssets:
+        """Один подбор фона на сцену (в отличие от построчного ``match_assets``)."""
+        result = ResolvedAssets()
+        if universe_id is None or not tags:
+            return result
+        try:
+            background = await self._codex_service.match_background(universe_id, tags)
+        except CodexUnavailableError as e:
+            logger.warning(
+                f"SceneAssetService: background match failed for tags={tags}: {e}"
+            )
+            return result
+        if background:
+            result.background_asset_key = background.asset_key
+            result.sound_asset_key = background.sound_asset_key
+        else:
+            logger.warning(
+                f"SceneAssetService: no background matched for tags={tags}"
+            )
+        return result
+
     async def match_assets(
         self,
         prepared: list[tuple[Character | None, dict, LineAssets]],
         assets: SceneAssets,
         universe_id: int | None,
+        line_background_tags: list[list[str] | None] | None = None,
     ) -> list[ResolvedAssets]:
-        """Подбирает фон по тегам и визуал (спрайт+наряд+эмоцию) через Codex."""
+        """Подбирает фон (по сегментам) и визуал (спрайт+наряд+эмоцию) через Codex.
+
+        ``line_background_tags`` — теги фона на каждую реплику (по одному списку на
+        реплику; ``None`` на позиции — фон для этой реплики не резолвится). Одинаковые
+        наборы резолвятся один раз и раздаются всем репликам сегмента. Если весь
+        параметр ``None`` — построчный подбор для обратной совместимости (тесты и
+        старые сцены).
+        """
+        scene_backgrounds: dict[tuple[str, ...], ResolvedAssets] = {}
+        if line_background_tags is not None:
+            unique: dict[tuple[str, ...], list[str]] = {}
+            for tags in line_background_tags:
+                if tags:
+                    unique.setdefault(tuple(tags), tags)
+            if unique:
+                keys = list(unique)
+                resolved = await asyncio.gather(
+                    *(self.match_scene_background(universe_id, unique[key]) for key in keys)
+                )
+                scene_backgrounds = dict(zip(keys, resolved))
 
         async def resolve(
-            character: Character | None, line: LineAssets
+            character: Character | None, line: LineAssets, index: int
         ) -> ResolvedAssets:
             result = ResolvedAssets()
 
-            # Фон подбирается по тегам-смыслам через Codex (как и визуал).
-            if universe_id is not None and line.background_tags:
+            if line_background_tags is not None:
+                tags = line_background_tags[index]
+                if tags:
+                    bg_resolved = scene_backgrounds[tuple(tags)]
+                    result.background_asset_key = bg_resolved.background_asset_key
+                    result.sound_asset_key = bg_resolved.sound_asset_key
+            elif universe_id is not None and line.background_tags:
+                # Обратная совместимость: построчный подбор фона (тесты и старые сцены).
                 try:
                     background = await self._codex_service.match_background(
                         universe_id, line.background_tags
@@ -246,7 +477,10 @@ class SceneAssetService:
             return result
 
         return await asyncio.gather(
-            *(resolve(character, line) for character, _, line in prepared)
+            *(
+                resolve(character, line, index)
+                for index, (character, _, line) in enumerate(prepared)
+            )
         )
 
     @staticmethod
@@ -285,10 +519,12 @@ class SceneAssetService:
                 )
                 or "-"
             )
-            lines.append("Backgrounds (background_base_tag + background_modifier_tags):")
-            lines.append(f"  locations (exactly one background_base_tag): {base}")
+            lines.append("Backgrounds (locations and modifiers):")
             lines.append(
-                f"  modifiers (0 or more background_modifier_tags): {modifiers}"
+                f"  locations (background_changes[].location_slug): {base}"
+            )
+            lines.append(
+                f"  modifiers (background_modifier_tags): {modifiers}"
             )
         for character in characters:
             outfits = assets.outfits.get(character.codex_character_id)

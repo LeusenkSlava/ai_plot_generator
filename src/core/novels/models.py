@@ -237,6 +237,8 @@ class DialogueLine:
     background_asset_key: str | None = None
     sound_asset_key: str | None = None
     sprite_asset_key: str | None = None
+    # slug базовой локации, где происходит реплика (для блока «Last lines» промпта)
+    location_slug: str | None = None
     # style-тег наряда, которым реплика адресует одежду («Current outfits»)
     outfit_tag: str | None = None
     outfit_asset_key: str | None = None

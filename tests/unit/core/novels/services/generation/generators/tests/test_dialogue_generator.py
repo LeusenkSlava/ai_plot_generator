@@ -62,13 +62,20 @@ def seed_codex(codex: FakeCodexService) -> None:
             background_domain(
                 id=1, universe_id=1, slug="forest", description="Лес",
                 asset_key="bg/forest.png", sound_asset_key="sounds/forest.ogg",
-            )
+            ),
+            background_domain(
+                id=2, universe_id=1, slug="gate", description="Ворота",
+                asset_key="bg/gate.png",
+            ),
         ],
     )
     codex.add_background_tags(
         1,
         BackgroundTags(
-            base=[Tag(id=6, type=TagType.LOCATION, slug="forest", name="Лес")],
+            base=[
+                Tag(id=6, type=TagType.LOCATION, slug="forest", name="Лес"),
+                Tag(id=8, type=TagType.LOCATION, slug="gate", name="Ворота"),
+            ],
             modifiers=[Tag(id=7, type=TagType.TIME_OF_DAY, slug="day", name="День")],
         ),
     )
@@ -132,8 +139,6 @@ def _default_payload() -> dict:
         dialogue_line_payload(
             character_name="Алиса",
             text="Я найду брата!",
-            background_base_tag="forest",
-            background_modifier_tags=[],
             emotion_base_tag="angry",
             emotion_modifier_tags=["soft"],
             outfit_tag="red-dress",
@@ -141,8 +146,6 @@ def _default_payload() -> dict:
         dialogue_line_payload(
             character_name="Боб",
             text="Я пойду с тобой.",
-            background_base_tag="forest",
-            background_modifier_tags=[],
             emotion_base_tag="calm",
             emotion_modifier_tags=[],
             outfit_tag="armor",
@@ -258,7 +261,9 @@ async def world(
     roadmap = await roadmap_repository.add(
         roadmap_domain(id=None, novel_id=novel.id)
     )
-    scene = await scene_repository.add(scene_domain(id=None, roadmap_id=roadmap.id))
+    scene = await scene_repository.add(
+        scene_domain(id=None, roadmap_id=roadmap.id, location_slug="forest")
+    )
     alice = await character_repository.add(
         novel_character_domain(
             id=None, novel_id=novel.id, name="Алиса", role="Ведьма",
@@ -334,7 +339,7 @@ class TestGenerateWithoutUniverse:
 
         user_prompt = generator.last_user_prompt
         assert "Asset catalog" not in user_prompt
-        assert "Backgrounds (background_base_tag" not in user_prompt
+        assert "Backgrounds (locations and modifiers)" not in user_prompt
 
     async def test_llm_called_exactly_once(self, sut, generator, world):
         await sut.generate(scene_id=world.scene.id)
@@ -424,18 +429,159 @@ class TestGenerateWithUniverse:
         assert bob_line.emotion_asset_key == "emotions/bob-calm.png"
         assert bob_line.is_final_for_scene is True
 
+    async def test_background_resolved_once_per_scene(self, sut, codex, world):
+        """Фон подбирается один раз и раздаётся всем репликам сцены."""
+        result = await sut.generate(scene_id=world.scene.id)
+
+        match_bg_calls = [c for c in codex.calls if c[0] == "match_background"]
+        assert len(match_bg_calls) == 1
+        assert {line.background_asset_key for line in result} == {"bg/forest.png"}
+
+    async def test_background_changes_split_scene_into_segments(
+        self, sut, codex, generator, world
+    ):
+        """background_changes разбивает сцену на сегменты с разными тегами фона."""
+        generator.returns(
+            valid_dialogue_llm_payload(
+                dialogue_line_payload(
+                    character_name="Алиса",
+                    text="Я найду брата!",
+                    emotion_base_tag="angry",
+                    emotion_modifier_tags=[],
+                    outfit_tag="red-dress",
+                ),
+                dialogue_line_payload(
+                    character_name="Боб",
+                    text="Я пойду с тобой.",
+                    emotion_base_tag="calm",
+                    emotion_modifier_tags=[],
+                    outfit_tag="armor",
+                ),
+                background_changes=[
+                    {"at_line": 2, "background_modifier_tags": ["outside"]}
+                ],
+            )
+        )
+
+        await sut.generate(scene_id=world.scene.id)
+
+        tags_calls = {tuple(c[2]) for c in codex.calls if c[0] == "match_background"}
+        assert tags_calls == {
+            ("forest",),
+            ("forest", "outside"),
+        }
+
+    async def test_background_changes_switch_location_within_scene(
+        self, sut, codex, generator, world
+    ):
+        """Смена может поменять базовую локацию; location_slug реплики следует за ней."""
+        generator.returns(
+            valid_dialogue_llm_payload(
+                dialogue_line_payload(
+                    character_name="Алиса",
+                    text="Я найду брата!",
+                    emotion_base_tag="angry",
+                    emotion_modifier_tags=[],
+                    outfit_tag="red-dress",
+                ),
+                dialogue_line_payload(
+                    character_name="Боб",
+                    text="Я пойду с тобой.",
+                    emotion_base_tag="calm",
+                    emotion_modifier_tags=[],
+                    outfit_tag="armor",
+                ),
+                background_changes=[
+                    {
+                        "at_line": 2,
+                        "location_slug": "gate",
+                        "background_modifier_tags": ["outside"],
+                    }
+                ],
+            )
+        )
+
+        result = await sut.generate(scene_id=world.scene.id)
+
+        tags_calls = {tuple(c[2]) for c in codex.calls if c[0] == "match_background"}
+        assert tags_calls == {
+            ("forest",),
+            ("gate", "outside"),
+        }
+        assert [line.location_slug for line in result] == ["forest", "gate"]
+        assert [line.background_asset_key for line in result] == [
+            "bg/forest.png",
+            "bg/gate.png",
+        ]
+
+    async def test_scene_background_uses_top_level_modifier_tags(
+        self, sut, codex, generator, world
+    ):
+        """Модификаторы фона берутся из top-level поля ответа модели."""
+        generator.returns(
+            valid_dialogue_llm_payload(
+                dialogue_line_payload(
+                    character_name="Алиса",
+                    text="Я найду брата!",
+                    emotion_base_tag="angry",
+                    emotion_modifier_tags=[],
+                    outfit_tag="red-dress",
+                ),
+                background_modifier_tags=["day"],
+            )
+        )
+
+        await sut.generate(scene_id=world.scene.id)
+
+        assert ("match_background", 1, ["forest", "day"]) in codex.calls
+
+    async def test_scene_background_forces_scene_time_of_day(
+        self, sut, codex, generator, world, scene_repository
+    ):
+        """Время суток фона принудительно берётся из сцены, а не из ответа модели."""
+        scene = await scene_repository.add(
+            scene_domain(
+                id=None,
+                roadmap_id=world.roadmap.id,
+                location_slug="forest",
+                time_of_day="night",
+            )
+        )
+        generator.returns(
+            valid_dialogue_llm_payload(
+                dialogue_line_payload(
+                    character_name="Алиса",
+                    text="Я найду брата!",
+                    emotion_base_tag="angry",
+                    emotion_modifier_tags=[],
+                    outfit_tag="red-dress",
+                ),
+                background_modifier_tags=["day"],
+            )
+        )
+
+        await sut.generate(scene_id=scene.id)
+
+        assert ("match_background", 1, ["forest", "night"]) in codex.calls
+
+    async def test_lines_store_location_slug(self, sut, world):
+        result = await sut.generate(scene_id=world.scene.id)
+
+        assert [line.location_slug for line in result] == ["forest", "forest"]
+
     async def test_prompt_contains_catalog(self, sut, generator, world):
         await sut.generate(scene_id=world.scene.id)
 
         user_prompt = generator.last_user_prompt
         assert "Asset catalog" in user_prompt
-        assert "Backgrounds (background_base_tag" in user_prompt
+        assert "Backgrounds (locations and modifiers)" in user_prompt
         generator.assert_system_contains(
-            "background_base_tag",
+            "background_modifier_tags",
             "outfit_tag",
             "emotion_base_tag",
             "emotion_modifier_tags",
         )
+        generator.assert_system_not_contains("background_base_tag")
 
     async def test_prompt_has_no_sprite_slug(self, sut, generator, world):
         await sut.generate(scene_id=world.scene.id)
@@ -576,14 +722,20 @@ class TestAssetMatching:
         assert result[0].sprite_asset_key is None
         assert result[0].outfit_asset_key is None
 
-    async def test_unresolved_background_slug_is_none(self, sut, generator, world):
+    async def test_unresolved_scene_location_is_none(self, sut, generator, world, scene_repository):
+        """Локация сцены не найдена в Codex — фон остаётся пустым (None)."""
+        scene = await scene_repository.add(
+            scene_domain(
+                id=None,
+                roadmap_id=world.roadmap.id,
+                location_slug="nonexistent",
+            )
+        )
         generator.returns(
             valid_dialogue_llm_payload(
                 dialogue_line_payload(
                     character_name="Алиса",
                     text="Где же он?",
-                    background_base_tag="nonexistent",
-                    background_modifier_tags=[],
                     emotion_base_tag="angry",
                     emotion_modifier_tags=[],
                     outfit_tag="red-dress",
@@ -591,9 +743,10 @@ class TestAssetMatching:
             )
         )
 
-        result = await sut.generate(scene_id=world.scene.id)
+        result = await sut.generate(scene_id=scene.id)
 
         assert result[0].background_asset_key is None
+        assert result[0].location_slug == "nonexistent"
 
 
 # ---------------------------------------------------------------------------
@@ -891,7 +1044,9 @@ class TestProtagonist:
         roadmap = await roadmap_repository.add(
             roadmap_domain(id=None, novel_id=novel.id)
         )
-        scene = await scene_repository.add(scene_domain(id=None, roadmap_id=roadmap.id))
+        scene = await scene_repository.add(
+        scene_domain(id=None, roadmap_id=roadmap.id, location_slug="forest")
+    )
         alice = await character_repository.add(
             novel_character_domain(
                 id=None, novel_id=novel.id, name="Алиса", role="Ведьма",

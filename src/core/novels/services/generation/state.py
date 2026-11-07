@@ -10,7 +10,7 @@ from src.core.novels.models import (
 )
 
 PREVIOUS_SCENES_LIMIT = 5
-PREVIOUS_LINES_LIMIT = 4
+PREVIOUS_LINES_LIMIT = 12
 
 
 @dataclass(frozen=True, slots=True)

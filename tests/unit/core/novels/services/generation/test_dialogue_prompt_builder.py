@@ -1,7 +1,7 @@
 """Юнит-тесты DialoguePromptBuilder: правила выбора наряда и каталог ассетов."""
 
 from src.core.codex.models import TagKind
-from src.core.novels.models import Prompt, Roadmap
+from src.core.novels.models import LineKind, Prompt, Roadmap
 from src.core.novels.services.generation.assets import SceneAssets, SceneAssetService
 from src.core.novels.services.generation.prompts.dialogue import (
     CURRENT_OUTFITS_HEADER,
@@ -10,6 +10,7 @@ from src.core.novels.services.generation.prompts.dialogue import (
     DialoguePromptContext,
 )
 from tests.factories import (
+    dialogue_line_domain,
     novel_character_domain,
     scene_domain,
 )
@@ -162,3 +163,71 @@ def test_catalog_shows_swimsuit_once_alongside_uniform():
     assert user.count("- camp_uniform (") == 1
     assert user.count("- swimsuit (") == 1
     assert "shy=Смущение" in user
+
+
+def test_assets_block_uses_scene_level_background_not_per_line():
+    """Фон задаётся одним top-level полем, а не на каждую реплику."""
+    system, _ = _build(_assets())
+
+    assert "background_modifier_tags" in system
+    assert "background_base_tag" not in system
+
+
+def test_assets_block_describes_background_changes():
+    """Инструкция описывает сегментные смены фона внутри сцены."""
+    system, _ = _build(_assets())
+
+    assert "background_changes" in system
+    assert "at_line" in system
+    assert "location_slug" in system
+    assert "inside the bus" in system
+    assert "narration line" in system
+
+
+def test_assets_block_forbids_time_of_day_changes():
+    """Время суток фиксировано на сцену и не меняется через background_changes."""
+    system, _ = _build(_assets())
+
+    assert "time of day is fixed for the whole scene" in system
+    assert "do not change it via background_changes either" in system
+    assert "do not put a time-of-day tag here either" in system
+    assert "set it to null (or omit it) to stay in" in system
+
+
+def test_render_previous_line_with_location_prefix():
+    """Префикс [location] добавляется только при with_location=True."""
+    line = dialogue_line_domain(
+        id=1, scene_id=1, character_id=2, text="Где он?",
+        kind=LineKind.SPEECH, location_slug="beach",
+    )
+
+    rendered = DialoguePromptBuilder.render_previous_line(
+        line, {2: "Семён"}, with_location=True
+    )
+
+    assert rendered == "[beach] Семён: Где он?"
+
+
+def test_render_previous_line_without_location_is_unchanged():
+    """Путь story_context (без with_location) остаётся без префикса локации."""
+    line = dialogue_line_domain(
+        id=1, scene_id=1, character_id=2, text="Где он?",
+        kind=LineKind.SPEECH, location_slug="beach",
+    )
+
+    rendered = DialoguePromptBuilder.render_previous_line(line, {2: "Семён"})
+
+    assert rendered == "Семён: Где он?"
+
+
+def test_render_narration_line_with_location():
+    line = dialogue_line_domain(
+        id=1, scene_id=1, character_id=None, text="Темно.",
+        kind=LineKind.NARRATION, location_slug="beach",
+    )
+
+    rendered = DialoguePromptBuilder.render_previous_line(
+        line, {}, with_location=True
+    )
+
+    assert rendered == "[beach] [narration] Темно."
